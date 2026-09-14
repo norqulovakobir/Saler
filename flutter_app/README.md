@@ -1,6 +1,6 @@
 # Saler AI — Flutter ilova
 
-Telegram botning mobil (Android/iOS) versiyasi. Xuddi shu serverga (`src/server.js`) ulanadi.
+Saler AI mobil ilovasi (Android/iOS). `server/` papkasidagi mustaqil backendga ulanadi.
 
 ## Ishga tushirish
 
@@ -56,11 +56,11 @@ Sotuvchi bo'limiga login/parol bilan kiriladi (bot orqali ro'yxatdan o'tilgan do
 ## Sozlash (env.json)
 
 ```bash
-cp env.example.json env.json      # API_BASE ni bot serveri manziliga o'zgartiring
+cp env.example.json env.json      # API_BASE ni server manziliga o'zgartiring
 flutter pub get
 flutter run --dart-define-from-file=env.json
 flutter build apk --dart-define-from-file=env.json
 ```
 
 - Emulyator + lokal bot: `"API_BASE": "http://10.0.2.2:3000"`
-- Haqiqiy telefon: `cd ../bot && npm run tunnel` bergan HTTPS manzil
+- Haqiqiy telefon: Render'dagi server manzili, masalan `https://saler-server.onrender.com`

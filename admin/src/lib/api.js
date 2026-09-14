@@ -1,5 +1,5 @@
 'use client';
-// Bot serveridagi /api/admin bilan ishlash. Token brauzer xotirasida.
+// server/ dagi /api/admin bilan ishlash. Token brauzer xotirasida.
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000').replace(/\/$/, '');
 const KEY = 'saler_admin_token';
 
