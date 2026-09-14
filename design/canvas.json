@@ -1,0 +1,16 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 390, "h": 844, "title": "A · Bosh sahifa (yorug')" },
+    { "file": "Shop.dc.html", "x": 480, "y": 0, "w": 390, "h": 844, "title": "A · Do'kon" },
+    { "file": "Product.dc.html", "x": 960, "y": 0, "w": 390, "h": 844, "title": "A · Mahsulot" },
+    { "file": "Chat.dc.html", "x": 1440, "y": 0, "w": 390, "h": 844, "title": "A · AI chat" },
+    { "file": "Analytics.dc.html", "x": 1920, "y": 0, "w": 390, "h": 844, "title": "A · Sotuvchi analitika" },
+    { "file": "MainDark.dc.html", "x": 0, "y": 1000, "w": 390, "h": 844, "title": "A · Bosh sahifa (qorong'i)" },
+    { "file": "DirectionB.dc.html", "x": 480, "y": 1000, "w": 390, "h": 844, "title": "B · Qalin qorong'i yo'nalish" }
+  ],
+  "annotations": [
+    { "id": "note-a", "x": 0, "y": -150, "w": 420, "text": "A yo'nalish — Yumshoq premium: iliq oq fon, 20px yumaloq kartochkalar, bitta ko'k urg'u, Manrope shrifti, suzuvchi navigatsiya. Barcha ekranlar shu yo'nalishda." },
+    { "id": "note-b", "x": 480, "y": 860, "w": 420, "text": "B yo'nalish — Qalin qorong'i: Syne katta sarlavhalar, lime urg'u, ro'yxat ko'rinishi, o'tkir burchaklar. Faqat bosh sahifa chizilgan; tanlansa qolgan ekranlar shu uslubda qilinadi." }
+  ],
+  "launch": { "view": "canvas" }
+}

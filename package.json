@@ -1,0 +1,18 @@
+{
+  "name": "saler-ai",
+  "private": true,
+  "description": "Saler AI: bot/ (Telegram bot + API), mini_app/ (Telegram Mini App), flutter_app/ (mobil ilova)",
+  "scripts": {
+    "bot": "npm --prefix bot start",
+    "bot:dev": "npm --prefix bot run dev",
+    "bot:tunnel": "npm --prefix bot run tunnel",
+    "bot:install": "npm --prefix bot install",
+    "mini_app": "npm --prefix mini_app start",
+    "admin": "npm --prefix admin run dev",
+    "admin:build": "npm --prefix admin run build",
+    "admin:start": "npm --prefix admin start",
+    "admin:install": "npm --prefix admin install",
+    "publish:bot": "node scripts/publish.js bot https://github.com/norqulovakobir/Saleraibot.git",
+    "publish:mini_app": "node scripts/publish.js mini_app https://github.com/norqulovakobir/Saler-mini-app.git"
+  }
+}
