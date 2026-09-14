@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: saler-admin
+    runtime: node
+    plan: free
+    buildCommand: npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NEXT_PUBLIC_API_URL
+        sync: false

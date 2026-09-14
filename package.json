@@ -3,9 +3,12 @@
   "private": true,
   "description": "Saler AI: flutter_app/ (mobil ilova), admin/ (admin panel), design/ (dizayn maketlari)",
   "scripts": {
+    "build": "npm --prefix admin ci && npm --prefix admin run build",
+    "start": "npm --prefix admin start",
     "admin": "npm --prefix admin run dev",
     "admin:build": "npm --prefix admin run build",
     "admin:start": "npm --prefix admin start",
     "admin:install": "npm --prefix admin install"
-  }
+  },
+  "engines": { "node": ">=20" }
 }
