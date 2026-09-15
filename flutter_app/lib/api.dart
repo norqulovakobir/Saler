@@ -1,4 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter/foundation.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'config.dart';
@@ -21,7 +25,82 @@ class Api {
   int? userId;
   String userName = 'Xaridor';
 
+  /// Ro'yxatdan o'tgan xaridor hisobi (ilovadan foydalanish uchun majburiy)
+  bool registered = false;
+  String? phone;
+
+  /// Server hisob talab qilganda (403 needAuth) chaqiriladi: ilova kirish ekraniga qaytadi
+  void Function()? onNeedAuth;
+
+  Future<void> saveUser(Map u) async {
+    userId = (u['id'] as num?)?.toInt() ?? userId;
+    userName = (u['name'] ?? userName).toString();
+    phone = u['phone']?.toString();
+    registered = u['registered'] == true;
+    final prefs = await SharedPreferences.getInstance();
+    if (userId != null) await prefs.setInt('userId', userId!);
+    await prefs.setString('userName', userName);
+  }
+
+  /// Hisobdan chiqish: server sessiyasi o'chiriladi va yangi mehmon sessiyasi olinadi
+  Future<void> logout() async {
+    try {
+      await post('/api/auth/logout');
+    } catch (_) {}
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('token');
+    await prefs.remove('userId');
+    await prefs.remove('userName');
+    _token = null;
+    userId = null;
+    userName = 'Xaridor';
+    registered = false;
+    phone = null;
+    clearCache();
+    await _guest(prefs);
+  }
+
+  /// Kirish xabarnomasi uchun: qaysi qurilma va ilovadan, qayerdan kirilgani
+  String _device = '';
+  String _app = 'Saler AI $appVersion';
+  String? _location;
+
+  Future<void> _loadClientInfo() async {
+    try {
+      final info = DeviceInfoPlugin();
+      if (kIsWeb) {
+        final w = await info.webBrowserInfo;
+        _device = '${w.browserName.name} brauzer';
+        _app = 'Saler AI $appVersion (veb)';
+      } else if (defaultTargetPlatform == TargetPlatform.android) {
+        final a = await info.androidInfo;
+        _device = '${a.manufacturer} ${a.model} · Android ${a.version.release}';
+        _app = 'Saler AI $appVersion (Android ilova)';
+      } else if (defaultTargetPlatform == TargetPlatform.iOS) {
+        final i = await info.iosInfo;
+        _device = '${i.model} · iOS ${i.systemVersion}';
+        _app = 'Saler AI $appVersion (iOS ilova)';
+      }
+    } catch (_) {}
+  }
+
+  /// Oxirgi ma'lum joylashuv. Ruxsat so'ralmaydi: faqat ilgari berilgan bo'lsa olinadi
+  Future<void> refreshLocation() async {
+    if (kIsWeb) return;
+    try {
+      final perm = await Geolocator.checkPermission();
+      if (perm != LocationPermission.always && perm != LocationPermission.whileInUse) return;
+      final pos = await Geolocator.getLastKnownPosition();
+      if (pos != null) _location = '${pos.latitude.toStringAsFixed(5)},${pos.longitude.toStringAsFixed(5)}';
+    } catch (_) {}
+  }
+
+  /// HTTP sarlavhasi faqat Latin-1 belgilarni qabul qiladi
+  static String _hv(String s) => s.replaceAll(RegExp(r'[^\x20-\x7E\u00A0-\u00FF]'), '?');
+
   Future<void> init() async {
+    await _loadClientInfo();
+    unawaited(refreshLocation());
     final prefs = await SharedPreferences.getInstance();
     _token = prefs.getString('token');
     userId = prefs.getInt('userId');
@@ -39,9 +118,13 @@ class Api {
     await prefs.setInt('userId', userId!);
   }
 
+  Map<String, String> get authHeaders => _headers;
+
   Map<String, String> get _headers => {
         'Content-Type': 'application/json',
         if (_token != null) 'Authorization': 'Bearer $_token',
+        if (_device.isNotEmpty) 'X-Device': _hv(_device),
+        'X-App': _hv(_app),
       };
 
   String photoUrl(String ref) => '$apiBase/api/photo/${Uri.encodeComponent(ref)}';
@@ -55,17 +138,20 @@ class Api {
     final uri = Uri.parse('$apiBase$path');
     late http.Response r;
     final b = body == null ? null : jsonEncode(body);
+    // Joylashuv faqat hisobga kirish so'rovida yuboriladi (xavfsizlik xabarnomasi uchun)
+    if (path.endsWith('/login')) await refreshLocation();
+    final h = {..._headers, if (path.endsWith('/login') && _location != null) 'X-Location': _location!};
     switch (method) {
       case 'GET':
-        r = await http.get(uri, headers: _headers);
+        r = await http.get(uri, headers: h);
       case 'POST':
-        r = await http.post(uri, headers: _headers, body: b);
+        r = await http.post(uri, headers: h, body: b);
       case 'PUT':
-        r = await http.put(uri, headers: _headers, body: b);
+        r = await http.put(uri, headers: h, body: b);
       case 'PATCH':
-        r = await http.patch(uri, headers: _headers, body: b);
+        r = await http.patch(uri, headers: h, body: b);
       case 'DELETE':
-        r = await http.delete(uri, headers: _headers);
+        r = await http.delete(uri, headers: h);
     }
     // Token eskirgan bo'lsa — yangi mehmon akkaunt
     if (r.statusCode == 401 && path != '/api/auth/guest') {
@@ -77,6 +163,10 @@ class Api {
       data = r.body.isEmpty ? {} : jsonDecode(r.body);
     } catch (_) {
       data = {};
+    }
+    if (r.statusCode == 403 && data is Map && data['needAuth'] == true) {
+      registered = false;
+      onNeedAuth?.call();
     }
     if (r.statusCode >= 400) {
       final msg = data is Map ? (data['error'] ?? 'Xato ${r.statusCode}') : 'Xato ${r.statusCode}';

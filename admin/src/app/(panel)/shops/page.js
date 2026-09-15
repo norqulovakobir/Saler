@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { MapPin, Search } from 'lucide-react';
 import { Avatar, Badge, Card, ErrorBox, PageTitle, Pagination, Table, Toolbar } from '@/components/ui';
@@ -14,6 +14,8 @@ export default function Shops() {
   const [page, setPage] = useState(1);
   const dq = useDebounced(q);
   const { data, loading, error, reload } = useApi('/shops', { query: { q: dq, sort, page, limit: 25 } });
+  // Bosh sahifadagi qidiruvdan "Hammasi" bosilganda so'rov shu yerda davom etadi
+  useEffect(() => { const fromUrl = new URLSearchParams(window.location.search).get('q'); if (fromUrl) setQ(fromUrl); }, []);
 
   return (
     <>

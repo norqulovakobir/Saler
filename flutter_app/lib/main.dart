@@ -3,16 +3,22 @@ import 'package:flutter/services.dart';
 import 'api.dart';
 import 'l10n.dart';
 import 'notify.dart';
+import 'realtime.dart';
+import 'screens/account_screen.dart';
+import 'screens/onboarding_screen.dart';
 import 'state.dart';
 import 'theme.dart';
 import 'screens/shops_screen.dart';
-import 'screens/map_screen.dart';
+import 'screens/reels_screen.dart';
 import 'screens/assistant_screen.dart';
 import 'screens/my_orders_screen.dart';
 import 'screens/seller/seller_home.dart';
 import 'screens/seller/auth_screen.dart';
 import 'screens/courier/courier_home.dart';
 import 'widgets.dart';
+
+/// Hozir ochiq pastki bo'lim (Reels ko'rish vaqtini faqat u ochiq bo'lganda hisoblaydi). -1: sotuvchi yoki kuryer rejimi
+final rootTab = ValueNotifier<int>(0);
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -78,8 +84,8 @@ class BootSplash extends StatelessWidget {
                   child: Row(children: [
                     Icon(Icons.cloud_off_rounded, color: p.danger),
                     const SizedBox(width: 10),
-                    Expanded(
-                        child: Text("Serverga ulanib bo'lmadi.\nInternetni tekshirib, qayta urinib ko'ring.", style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600, height: 1.4))),
+                    const Expanded(
+                        child: Text("Serverga ulanib bo'lmadi.\nInternetni tekshirib, qayta urinib ko'ring.", style: TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600, height: 1.4))),
                   ]),
                 ),
                 const SizedBox(height: 14),
@@ -112,10 +118,21 @@ class SalerApp extends StatefulWidget {
 class _SalerAppState extends State<SalerApp> {
   late Future<void> _init = _boot();
 
+  @override
+  void initState() {
+    super.initState();
+    // Server hisob talab qilsa (masalan sessiya o'chirilgan), kirish ekraniga qaytamiz
+    Api.instance.onNeedAuth = () {
+      Realtime.instance.stop();
+      if (mounted) setState(() {});
+    };
+  }
+
   Future<void> _boot() async {
     await Api.instance.init();
     await AppState.instance.load();
     await Notify.instance.init();
+    if (Api.instance.registered) AppState.instance.startLive();
   }
 
   @override
@@ -136,6 +153,16 @@ class _SalerAppState extends State<SalerApp> {
             if (snap.hasError) {
               debugPrint('Boot xatosi: ${snap.error}');
               return BootSplash(error: '${snap.error}', onRetry: () => setState(() => _init = _boot()));
+            }
+            // Birinchi kirishda tanishtiruv: til tanlash va bannerlar, oxirida hisob ekrani
+            if (!AppState.instance.onboarded) return OnboardingScreen(onDone: () => setState(() {}));
+            // Ilovadan foydalanish uchun hisob majburiy
+            if (!Api.instance.registered) {
+              return AccountScreen(onDone: () {
+                AppState.instance.startLive();
+                Realtime.instance.restart();
+                setState(() {});
+              });
             }
             return const RootShell();
           },
@@ -271,6 +298,8 @@ class _RootShellState extends State<RootShell> {
     });
     // Sotuvchi kirgan bo'lsa, buyurtmalarni kuzatishni har doim davom ettiramiz
     AppState.instance.sellerShop != null ? AppState.instance.startPolling() : AppState.instance.stopPolling();
+    // Sessiya kanallari o'zgardi (do'kon), jonli aloqa qayta ulanadi
+    Realtime.instance.restart();
   }
 
   void onTab(int i) {
@@ -288,25 +317,34 @@ class _RootShellState extends State<RootShell> {
   }
 
   Widget _build(BuildContext context) {
+    final visibleTab = sellerMode || courierMode ? -1 : index;
+    WidgetsBinding.instance.addPostFrameCallback((_) => rootTab.value = visibleTab);
     if (sellerMode && AppState.instance.sellerShop != null) {
       return SellerHome(onExit: () => switchMode(false));
     }
     if (courierMode && AppState.instance.courier != null) {
-      return CourierHome(onExit: () => setState(() => courierMode = false));
+      return CourierHome(onExit: () {
+        setState(() => courierMode = false);
+        Realtime.instance.restart();
+      });
     }
     // Til o'zgarganda tab sahifalari qayta quriladi (Navigator ichidagi sahifalar o'z-o'zidan yangilanmaydi)
     final lk = L10n.lang.name;
     final pages = [
       TabNavigator(key: ValueKey('t0$lk'), navKey: keys[0], root: ShopsScreen(onSeller: () => switchMode(true))),
-      TabNavigator(key: ValueKey('t1$lk'), navKey: keys[1], root: MapScreen(inTab: true, onClose: () => setState(() => index = 0))),
+      // Reels: reytingi baland va qiziqishga mos mahsulotlar
+      TabNavigator(key: ValueKey('t1$lk'), navKey: keys[1], root: const ReelsScreen()),
       // Chat tabi — ilova yordamchisi Sofia (do'kon topib tavsiya beradi)
       TabNavigator(key: ValueKey('t2$lk'), navKey: keys[2], root: AssistantScreen(onClose: () => setState(() => index = 0))),
       TabNavigator(key: ValueKey('t3$lk'), navKey: keys[3], root: const MyOrdersScreen()),
-      TabNavigator(key: ValueKey('t4$lk'), navKey: keys[4], root: SellerEntry(onEntered: () => switchMode(true), onCourierEntered: () => setState(() {
-            courierMode = true;
-            sellerMode = false;
-            index = 0;
-          }))),
+      TabNavigator(key: ValueKey('t4$lk'), navKey: keys[4], root: SellerEntry(onEntered: () => switchMode(true), onCourierEntered: () {
+            setState(() {
+              courierMode = true;
+              sellerMode = false;
+              index = 0;
+            });
+            Realtime.instance.restart();
+          })),
     ];
     return PopScope(
       canPop: false,
@@ -318,15 +356,15 @@ class _RootShellState extends State<RootShell> {
       child: Scaffold(
         extendBody: true,
         body: IndexedStack(index: index, children: pages),
-        // Xarita va Chat tablarida panel yashirinadi — ekran to'liq kontentga beriladi
-        bottomNavigationBar: index == 1 || index == 2
+        // Chat tabida panel yashiriladi; Reels'da panel kontent ustida suzib turadi
+        bottomNavigationBar: index == 2
             ? null
             : FloatingNav(
           index: index,
           onTap: onTab,
           items: [
             NavItem(Icons.storefront_outlined, Icons.storefront_rounded, tr("Do'konlar")),
-            NavItem(Icons.map_outlined, Icons.map_rounded, tr('Xarita')),
+            NavItem(Icons.play_circle_outline_rounded, Icons.play_circle_rounded, tr('Reels')),
             NavItem(Icons.chat_bubble_outline_rounded, Icons.chat_bubble_rounded, tr('Chat')),
             NavItem(Icons.receipt_long_outlined, Icons.receipt_long_rounded, tr('Buyurtmalar')),
             NavItem(Icons.person_outline_rounded, Icons.person_rounded, tr('Sotuvchi')),

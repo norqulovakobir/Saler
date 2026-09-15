@@ -2,10 +2,11 @@ import { Router } from 'express';
 import os from 'node:os';
 import { q, one, all } from './db.js';
 import { ah, HttpError, newToken, pageArgs, str, num, day, logTail } from './util.js';
+import { storageEnabled } from './storage.js';
+import { aiInfo } from './ai.js';
 
 const r = Router();
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin';
-const AI_MODEL = process.env.AI_MODEL || 'claude-opus-5';
 
 // ---- auth ----
 r.post('/login', ah(async (req, res) => {
@@ -283,9 +284,9 @@ r.get('/system', ah(async (_req, res) => {
     node: process.version,
     memory: { rss: mem.rss, heapUsed: mem.heapUsed, heapTotal: mem.heapTotal },
     db,
-    uploads: { files: up.files, bytes: Number(up.bytes) },
+    uploads: { files: up.files, bytes: Number(up.bytes), storage: storageEnabled ? 'supabase' : 'postgres' },
     bot: null,
-    env: { groqModel: process.env.ANTHROPIC_API_KEY ? AI_MODEL : "AI kaliti yo'q", visionModel: process.env.ANTHROPIC_API_KEY ? AI_MODEL : '—', redis: false, port: process.env.PORT || 3000, webappUrl: process.env.ADMIN_URL || null },
+    env: { groqModel: aiInfo.model ? `${aiInfo.model} (${aiInfo.provider})` : "AI kaliti yo'q", visionModel: aiInfo.model || '—', redis: false, port: process.env.PORT || 3000, webappUrl: process.env.ADMIN_URL || null },
     platform: process.platform,
     cpuLoad: os.loadavg(),
     logTail: logTail(40),

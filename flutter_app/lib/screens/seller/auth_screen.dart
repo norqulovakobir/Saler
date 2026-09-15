@@ -21,7 +21,6 @@ class SellerEntry extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.p;
     return Scaffold(
       body: ListView(padding: const EdgeInsets.fromLTRB(20, 0, 20, navPad), children: [
         SizedBox(height: MediaQuery.of(context).padding.top + 16),
@@ -75,8 +74,6 @@ class SellerEntry extends StatelessWidget {
           subtitle: tr("Yaqin atrofdagi kuryerlar xaritada — qaysi biri qayerda, profili va reytingi"),
           onTap: () => Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(builder: (_) => const CouriersMapScreen())),
         ),
-        const SizedBox(height: 12),
-        Center(child: Text(tr("Do'kon Telegram botda ham ochilishi mumkin"), style: TextStyle(fontSize: 12, color: p.muted, fontWeight: FontWeight.w600))),
       ]),
     );
   }
@@ -197,15 +194,19 @@ class _AuthScreenState extends State<AuthScreen> {
       setState(() => error = tr("Barcha maydonlarni to'ldiring"));
       return;
     }
+    // Viloyat tanlanmagan bo'lsa, so'rov yubormaymiz va tugma bloklanib qolmaydi
+    if (register && cargo && regions.isEmpty) {
+      setState(() {
+        busy = false;
+        error = tr('Kamida bitta viloyatni tanlang');
+      });
+      return;
+    }
     setState(() {
       busy = true;
       error = null;
     });
     try {
-      if (register && cargo && regions.isEmpty) {
-        setState(() => error = tr('Kamida bitta viloyatni tanlang'));
-        return;
-      }
       final body = {
         for (final e in f.entries) e.key: e.value.text.trim(),
         if (courier) 'vehicle': vehicle,

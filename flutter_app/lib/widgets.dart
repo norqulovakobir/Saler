@@ -1,5 +1,6 @@
 import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'api.dart';
 import 'config.dart';
@@ -660,4 +661,34 @@ String fmtTime(DateTime d) {
   final l = d.toLocal();
   String two(int n) => n.toString().padLeft(2, '0');
   return '${two(l.day)}.${two(l.month)} ${two(l.hour)}:${two(l.minute)}';
+}
+
+/// Rasm manbasini tanlash oynasi: kamera yoki galereya. Yopilsa null qaytadi.
+Future<ImageSource?> askImageSource(BuildContext context) {
+  final p = context.p;
+  return showModalBottomSheet<ImageSource>(
+    context: context,
+    useRootNavigator: true,
+    backgroundColor: p.card,
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+    builder: (c) {
+      Widget option(IconData icon, String title, String sub, ImageSource src) => ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            leading: Container(width: 46, height: 46, decoration: BoxDecoration(color: p.accentSoft, borderRadius: BorderRadius.circular(14)), child: Icon(icon, color: p.accent)),
+            title: Text(tr(title), style: const TextStyle(fontWeight: FontWeight.w800)),
+            subtitle: Text(tr(sub), style: TextStyle(color: p.muted, fontSize: 13)),
+            onTap: () => Navigator.pop(c, src),
+          );
+      return SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 18, 8, 10),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 8), child: Text(tr("Rasm qo'shish"), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800))),
+            option(Icons.photo_camera_outlined, 'Kamera', 'Hozir suratga olish', ImageSource.camera),
+            option(Icons.photo_library_outlined, 'Galereya', 'Telefondagi rasmlardan tanlash', ImageSource.gallery),
+          ]),
+        ),
+      );
+    },
+  );
 }

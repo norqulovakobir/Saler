@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'api.dart';
 import 'models.dart';
 import 'notify.dart';
+import 'realtime.dart';
 
 class CartItem {
   final Product product;
@@ -27,8 +28,18 @@ class AppState extends ChangeNotifier {
   int newOrders = 0;
   int unread = 0;
 
+  /// Tanishtiruv (til tanlash va bannerlar) ko'rilganmi: faqat birinchi kirishda ko'rsatiladi
+  bool onboarded = false;
+
+  Future<void> setOnboarded() async {
+    onboarded = true;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setBool('onboarded', true);
+  }
+
   Future<void> load() async {
     final p = await SharedPreferences.getInstance();
+    onboarded = p.getBool('onboarded') ?? false;
     themeMode = ThemeMode.values[p.getInt('theme') ?? 0];
     L10n.lang = AppLang.values[(p.getInt('lang') ?? 0).clamp(0, AppLang.values.length - 1)];
     for (final s in p.getStringList('favs') ?? const []) {
@@ -41,8 +52,20 @@ class AppState extends ChangeNotifier {
     }
     try {
       final me = await Api.instance.get('/api/me');
+      if (me['user'] is Map) await Api.instance.saveUser(me['user']);
       if (me['shop'] != null) sellerShop = Shop.fromJson(me['shop']);
       if (me['courier'] != null) courier = Courier.fromJson(me['courier']);
+    } catch (_) {}
+    notifyListeners();
+  }
+
+  /// Hisobga kirgandan yoki chiqqandan keyin foydalanuvchi, do'kon va kuryer ma'lumotini qayta oladi
+  Future<void> reloadMe() async {
+    try {
+      final me = await Api.instance.get('/api/me');
+      if (me['user'] is Map) await Api.instance.saveUser(me['user']);
+      sellerShop = me['shop'] != null ? Shop.fromJson(me['shop']) : null;
+      courier = me['courier'] != null ? Courier.fromJson(me['courier']) : null;
     } catch (_) {}
     notifyListeners();
   }
@@ -102,6 +125,30 @@ class AppState extends ChangeNotifier {
     _saveCart();
   }
 
+  /// Jonli hodisalar: har yangi hodisada oshadi, ekranlar shu o'zgarganda joyida qayta yuklanadi
+  int liveVersion = 0;
+  RtEvent? lastEvent;
+  StreamSubscription<RtEvent>? _live;
+
+  void startLive() {
+    _live ??= Realtime.instance.events.listen(_onLive);
+    Realtime.instance.start();
+  }
+
+  void _onLive(RtEvent e) {
+    if (e.type == 'hello') return;
+    lastEvent = e;
+    liveVersion++;
+    if (e.type == 'notification') {
+      _lastNotifId = e.data['id']?.toString() ?? _lastNotifId;
+      Notify.instance.show(e.data['title']?.toString() ?? '', e.data['text']?.toString() ?? '');
+    } else if (e.type == 'product:new') {
+      Notify.instance.show("${e.data['shopName'] ?? "Do'kon"}: yangi mahsulot", e.data['name']?.toString() ?? '');
+    }
+    if (sellerShop != null) refreshBadges();
+    notifyListeners();
+  }
+
   Timer? _poll;
   int? _lastNewOrders; // bildirishnoma uchun oldingi qiymat
   String? _lastNotifId;
@@ -126,7 +173,8 @@ class AppState extends ChangeNotifier {
       newOrders = b['newOrders'] ?? 0;
       unread = b['unread'] ?? 0;
       // Yangi buyurtma paydo bo'ldi — qurilmaga bildirishnoma
-      if (_lastNewOrders != null && newOrders > _lastNewOrders!) await _notifyNewOrder();
+      // Jonli aloqa bo'lsa bildirishnoma hodisa bilan allaqachon kelgan, takrorlanmaydi
+      if (_lastNewOrders != null && newOrders > _lastNewOrders! && !Realtime.instance.connected) await _notifyNewOrder();
       _lastNewOrders = newOrders;
       notifyListeners();
     } catch (_) {}

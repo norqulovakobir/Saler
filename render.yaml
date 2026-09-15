@@ -1,10 +1,5 @@
 # Render Blueprint: Dashboard -> New -> Blueprint -> shu repo
-databases:
-  - name: saler-db
-    plan: free
-    databaseName: saler
-    user: saler
-
+# Baza va rasmlar Supabase'da (deploy/supabase/README.md). Render'da faqat server va admin panel ishlaydi.
 services:
   - type: web
     name: saler-server
@@ -17,16 +12,34 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "20"
+      # Supabase -> Connect -> Session pooler manzili
       - key: DATABASE_URL
-        fromDatabase:
-          name: saler-db
-          property: connectionString
+        sync: false
+      # Supabase -> Project Settings -> Data API -> Project URL
+      - key: SUPABASE_URL
+        sync: false
+      # Supabase -> Project Settings -> API Keys -> Secret key (sb_secret_...)
+      - key: SUPABASE_SECRET_KEY
+        sync: false
       - key: ADMIN_PASSWORD
         generateValue: true
-      - key: ANTHROPIC_API_KEY
+      # Google AI Studio kaliti: chatlar, AI yordamchi, sotuvchi maslahatlari
+      - key: GEMINI_API_KEY
         sync: false
-      - key: AI_MODEL
-        value: claude-opus-5
+      - key: GEMINI_MODEL
+        value: gemini-3.6-flash
+      # Production: tasdiqlash kodi hech qachon javobda qaytmaydi
+      - key: NODE_ENV
+        value: production
+      # EmailJS: ro'yxatdan o'tish va buyurtmada 6 xonali kod
+      - key: EMAILJS_SERVICE_ID
+        sync: false
+      - key: EMAILJS_TEMPLATE_ID
+        sync: false
+      - key: EMAILJS_PUBLIC_KEY
+        sync: false
+      - key: EMAILJS_PRIVATE_KEY
+        sync: false
 
   - type: web
     name: saler-admin

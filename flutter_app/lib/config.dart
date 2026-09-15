@@ -7,5 +7,8 @@
 /// Emulyatorda lokal server: http://10.0.2.2:3000, haqiqiy telefonda tunnel HTTPS manzili.
 const apiBase = String.fromEnvironment('API_BASE', defaultValue: 'http://10.0.2.2:3000');
 
+/// Ilova versiyasi (kirish xabarnomasida ko'rinadi)
+const appVersion = String.fromEnvironment('APP_VERSION', defaultValue: '1.0.0');
+
 /// Bot username (@ belgisisiz) — Telegram havolalari uchun.
 const botUsername = String.fromEnvironment('BOT_USERNAME', defaultValue: 'saler_ai_bot');

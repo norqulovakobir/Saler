@@ -147,11 +147,12 @@ class _ChatScreenState extends State<ChatScreen> {
             const SizedBox(width: 12),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(s.sellerName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                Text(s.sellerName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
                 Row(children: [
                   Container(width: 7, height: 7, decoration: BoxDecoration(color: p.success, shape: BoxShape.circle)),
                   const SizedBox(width: 6),
-                  Text('${s.name} ${tr('sotuvchisi · onlayn')}', style: TextStyle(fontSize: 12, color: p.success, fontWeight: FontWeight.w700))
+                  // Uzun do'kon nomi sarlavhadan toshib ketmasin
+                  Flexible(child: Text('${s.name} ${tr('sotuvchisi · onlayn')}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: p.success, fontWeight: FontWeight.w700)))
                 ]),
               ]),
             ),

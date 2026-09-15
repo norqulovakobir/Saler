@@ -49,3 +49,6 @@ app.*.map.json
 
 # Lokal sozlamalar (namuna: env.example.json)
 env.json
+
+# Onboarding bannerlarining asl nusxalari (ilova assets/onboarding/ dagi siqilgan webp fayllarni ishlatadi)
+Splash_Banners_UZ_RU_EN/

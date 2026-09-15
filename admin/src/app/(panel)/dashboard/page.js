@@ -1,11 +1,51 @@
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
-import { ArrowUpRight, Bike, Eye, Package, Receipt, RefreshCw, ShoppingCart, Store, Users, Wallet } from 'lucide-react';
-import { Card, ErrorBox, PageTitle, Stat, StatusBadge, Table } from '@/components/ui';
+import { useRouter } from 'next/navigation';
+import { ArrowUpRight, Bike, Eye, MapPin, Package, Receipt, RefreshCw, Search, ShoppingCart, Store, Users, Wallet, X } from 'lucide-react';
+import { Avatar, Card, ErrorBox, PageTitle, Stat, StatusBadge, Table } from '@/components/ui';
 import { AreaSeries, Bars, Donut } from '@/components/charts';
-import { useApi } from '@/lib/hooks';
+import { useApi, useDebounced } from '@/lib/hooks';
+import { photoUrl } from '@/lib/api';
 import { ago, money, moneyShort, num, shortDay } from '@/lib/format';
+
+/** Bosh sahifadagi do'kon qidiruvi: nomi, login, telefon yoki egasi bo'yicha */
+function ShopSearch() {
+  const router = useRouter();
+  const [q, setQ] = useState('');
+  const dq = useDebounced(q.trim());
+  const { data, loading, error } = useApi('/shops', { query: { q: dq, limit: 6 } });
+  const sub = !data ? 'Yuklanmoqda…' : dq ? `"${dq}" bo'yicha ${num(data.total)} ta natija` : `Jami ${num(data.total)} ta do'kon · oxirgi qo'shilganlar`;
+
+  return (
+    <Card title="Do'kon qidiruvi" sub={sub} className="mb-4" pad={false}
+      action={<Link href={dq ? `/shops?q=${encodeURIComponent(dq)}` : '/shops'} className="btn btn-sm btn-ghost">Hammasi <ArrowUpRight size={13} /></Link>}>
+      <div className="px-4 pb-3">
+        <div className="relative">
+          <Search size={15} className="absolute left-3 top-[11px] text-muted" />
+          <input className="input w-full pl-9 pr-9" placeholder="Do'kon nomi, login, telefon yoki egasi…" value={q} onChange={(e) => setQ(e.target.value)} />
+          {q && <button type="button" aria-label="Tozalash" className="absolute right-2 top-[7px] rounded-md p-1 text-muted hover:text-text" onClick={() => setQ('')}><X size={14} /></button>}
+        </div>
+      </div>
+      <ErrorBox error={error} />
+      <Table loading={loading} rows={data?.items || []} onRow={(r) => router.push(`/shops/${r.id}`)}
+        empty={dq ? `"${dq}" bo'yicha do'kon topilmadi` : "Hozircha do'konlar yo'q. Sotuvchilar ilovada ro'yxatdan o'tganda shu yerda ko'rinadi."}
+        cols={[
+          { key: 'name', label: "Do'kon", render: (r) => (
+            <div className="flex items-center gap-3">
+              <Avatar src={photoUrl(r.logo)} name={r.name} />
+              <div className="min-w-0"><div className="flex items-center gap-1.5 font-medium">{r.name}{r.hasLocation && <MapPin size={12} className="text-muted" />}</div><div className="text-xs text-muted">@{r.login}{r.ownerName ? ` · ${r.ownerName}` : ''}</div></div>
+            </div>
+          ) },
+          { key: 'phone', label: 'Telefon', render: (r) => <span className="text-xs text-text-2">{r.phone || '—'}</span> },
+          { key: 'products', label: 'Mahsulot', cls: 'text-right tabular-nums', render: (r) => num(r.products) },
+          { key: 'orders', label: 'Buyurtma', cls: 'text-right tabular-nums', render: (r) => <>{num(r.orders)}<span className="text-xs text-muted"> / {r.done}</span></> },
+          { key: 'revenue', label: 'Tushum', cls: 'text-right tabular-nums font-medium', render: (r) => moneyShort(r.revenue) },
+          { key: 'createdAt', label: 'Ochilgan', render: (r) => <span className="text-xs text-muted">{ago(r.createdAt)}</span> },
+        ]} />
+    </Card>
+  );
+}
 
 export default function Dashboard() {
   const [days, setDays] = useState(30);
@@ -24,6 +64,8 @@ export default function Dashboard() {
         <button className="btn" onClick={() => { ov.reload(); ts.reload(); orders.reload(); }}><RefreshCw size={14} />Yangilash</button>
       </>} />
       <ErrorBox error={ov.error} retry={ov.reload} />
+
+      <ShopSearch />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat loading={L} label="Tushum" value={o && moneyShort(o.revenue.total)} sub={o && `Hafta: ${moneyShort(o.revenue.week)}`} growth={o?.revenue.growth} icon={Wallet} />

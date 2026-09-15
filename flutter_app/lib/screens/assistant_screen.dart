@@ -241,7 +241,7 @@ class _CouriersBlock extends StatelessWidget {
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(c.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
-                    Text('${vehicleName(c.vehicle)}${c.distanceKm != null ? ' · ${c.distanceKm! < 1 ? '${(c.distanceKm! * 1000).round()} m' : '${c.distanceKm} km'}' : ''} · ★ ${c.rating.toStringAsFixed(1)}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: p.muted, fontWeight: FontWeight.w600)),
+                    Text('${vehicleName(c.vehicle)}${c.distanceKm != null ? ' · ${c.distanceKm! < 1 ? '${(c.distanceKm! * 1000).round()} m' : '${c.distanceKm} km'}' : ''} · ${c.deliveries > 0 ? '${c.deliveries} ${tr('yetkazish')}' : tr('Yangi')}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: p.muted, fontWeight: FontWeight.w600)),
                     Text(c.phone, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: p.success)),
                   ]),
                 ),
@@ -328,7 +328,7 @@ class _ShopBubble extends StatelessWidget {
                         const SizedBox(width: 10),
                         Icon(Icons.near_me_outlined, size: 13, color: p.accentText),
                         const SizedBox(width: 3),
-                        Text('${dist < 1 ? '${(dist * 1000).round()} m' : '$dist km'}', style: TextStyle(fontSize: 12, color: p.accentText, fontWeight: FontWeight.w700)),
+                        Text(dist < 1 ? '${(dist * 1000).round()} m' : '$dist km', style: TextStyle(fontSize: 12, color: p.accentText, fontWeight: FontWeight.w700)),
                       ],
                     ]),
                   ]),
