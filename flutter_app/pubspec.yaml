@@ -18,6 +18,7 @@ dependencies:
   geolocator: ^13.0.1
   flutter_local_notifications: ^18.0.1
   share_plus: ^10.1.4
+  device_info_plus: ^12.4.0
 
 dev_dependencies:
   flutter_test:
@@ -30,6 +31,9 @@ flutter:
   assets:
     - assets/img/
     - assets/img/cat/
+    - assets/onboarding/uz/
+    - assets/onboarding/ru/
+    - assets/onboarding/en/
   # Manrope shrifti ilova ichida (internetsiz ham bir xil ko'rinadi)
   fonts:
     - family: Manrope

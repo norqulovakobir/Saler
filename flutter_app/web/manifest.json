@@ -1,12 +1,11 @@
 {
-    "name": "saler_ai",
-    "short_name": "saler_ai",
+    "name": "Saler AI",
+    "short_name": "Saler AI",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#111111",
+    "theme_color": "#F5C400",
+    "description": "Saler AI — do'konlar, mahsulotlar va AI sotuvchi yordamchisi",
     "prefer_related_applications": false,
     "icons": [
         {

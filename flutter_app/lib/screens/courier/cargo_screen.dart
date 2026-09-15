@@ -6,7 +6,7 @@ import '../../main.dart';
 import '../../models.dart';
 import '../../theme.dart';
 import '../../widgets.dart';
-import 'courier_home.dart' show cargoVehicleName, cargoVehicleIcon;
+import 'courier_home.dart' show cargoVehicleName, cargoVehicleIcon, fmtKm;
 
 /// Viloyatlararo yuk: tashuvchilar ro'yxati (viloyat filtri bilan) va mashina buyurtma qilish
 class CargoScreen extends StatefulWidget {
@@ -74,76 +74,12 @@ class _CargoScreenState extends State<CargoScreen> {
 
   /// Buyurtma formasi: yuk tavsifi, og'irligi, sana, telefon
   Future<void> order(Courier c) async {
-    final f = {for (final k in ['cargo', 'weight', 'date', 'name', 'phone', 'address']) k: TextEditingController()};
-    f['name']!.text = Api.instance.userName == 'Xaridor' ? '' : Api.instance.userName;
-    var fromR = from ?? (c.regions.isNotEmpty ? c.regions.first : null);
-    var toR = to ?? (c.regions.length > 1 ? c.regions[1] : null);
     final ok = await showModalBottomSheet<bool>(
       useRootNavigator: true,
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) => Padding(
-          padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.of(ctx).viewInsets.bottom + 24),
-          child: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Text(tr('Yuk mashinasi buyurtma qilish'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: -.4)),
-              const SizedBox(height: 4),
-              Text('${c.name} · ${cargoVehicleName(c.vehicleType)}${c.capacityKg > 0 ? ' · ${c.capacityKg} kg' : ''}', style: TextStyle(fontSize: 13, color: ctx.p.muted, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 12),
-              Row(children: [
-                Expanded(child: _RegionBtn(tr('Qayerdan'), fromR, c.regions, (v) => setS(() => fromR = v))),
-                const SizedBox(width: 8),
-                Expanded(child: _RegionBtn(tr('Qayerga'), toR, c.regions, (v) => setS(() => toR = v))),
-              ]),
-              const SizedBox(height: 10),
-              TextField(controller: f['cargo'], decoration: InputDecoration(labelText: tr('Yuk (nima tashiladi)'), prefixIcon: const Icon(Icons.inventory_2_outlined, size: 20))),
-              const SizedBox(height: 10),
-              Row(children: [
-                Expanded(child: TextField(controller: f['weight'], keyboardType: TextInputType.number, decoration: InputDecoration(labelText: tr("Og'irligi, kg"), prefixIcon: const Icon(Icons.scale_outlined, size: 20)))),
-                const SizedBox(width: 8),
-                Expanded(child: TextField(controller: f['date'], decoration: InputDecoration(labelText: tr('Sana'), hintText: '20.09', prefixIcon: const Icon(Icons.event_outlined, size: 20)))),
-              ]),
-              const SizedBox(height: 10),
-              TextField(controller: f['address'], decoration: InputDecoration(labelText: tr('Yuklash manzili'), prefixIcon: const Icon(Icons.place_outlined, size: 20))),
-              const SizedBox(height: 10),
-              TextField(controller: f['name'], decoration: InputDecoration(labelText: tr('Ismingiz'), prefixIcon: const Icon(Icons.person_outline_rounded, size: 20))),
-              const SizedBox(height: 10),
-              TextField(controller: f['phone'], keyboardType: TextInputType.phone, decoration: InputDecoration(labelText: tr('Telefon raqam'), hintText: '+998 90 123 45 67', prefixIcon: const Icon(Icons.phone_outlined, size: 20))),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                icon: const Icon(Icons.local_shipping_rounded, size: 18),
-                label: Text(tr('Buyurtma berish')),
-                onPressed: () async {
-                  if (fromR == null || toR == null) {
-                    showToast(ctx, tr('Viloyatlarni tanlang'), error: true);
-                    return;
-                  }
-                  try {
-                    await Api.instance.post('/api/cargo/orders', {
-                      'carrierId': c.id,
-                      'fromRegion': fromR,
-                      'toRegion': toR,
-                      'cargo': f['cargo']!.text,
-                      'weightKg': int.tryParse(f['weight']!.text) ?? 0,
-                      'date': f['date']!.text,
-                      'address': f['address']!.text,
-                      'name': f['name']!.text,
-                      'phone': f['phone']!.text,
-                    });
-                    if (ctx.mounted) Navigator.pop(ctx, true);
-                  } catch (e) {
-                    if (ctx.mounted) showToast(ctx, e.toString(), error: true);
-                  }
-                },
-              ),
-              const SizedBox(height: 8),
-              Center(child: Text(tr("Tashuvchi siz bilan bog'lanib, narxni kelishib oladi"), style: TextStyle(fontSize: 12, color: ctx.p.muted))),
-            ]),
-          ),
-        ),
-      ),
+      builder: (_) => _CargoOrderSheet(carrier: c, from: from, to: to, allRegions: regions),
     );
     if (ok == true && mounted) {
       load();
@@ -198,6 +134,126 @@ class _CargoScreenState extends State<CargoScreen> {
   }
 }
 
+/// Yuk mashinasi buyurtma oynasi. Yuborilsa true qaytadi.
+class _CargoOrderSheet extends StatefulWidget {
+  final Courier carrier;
+  final String? from;
+  final String? to;
+  final List<String> allRegions;
+  const _CargoOrderSheet({required this.carrier, this.from, this.to, required this.allRegions});
+  @override
+  State<_CargoOrderSheet> createState() => _CargoOrderSheetState();
+}
+
+class _CargoOrderSheetState extends State<_CargoOrderSheet> {
+  final f = {for (final k in ['cargo', 'weight', 'date', 'name', 'phone', 'address']) k: TextEditingController()};
+  late final List<String> options = widget.carrier.regions.isNotEmpty ? widget.carrier.regions : widget.allRegions;
+  // Viloyat faqat foydalanuvchi filtrda o'zi tanlagan bo'lsa oldindan qo'yiladi — aks holda aniq tanlash shart
+  late String? fromR = options.contains(widget.from) ? widget.from : null;
+  late String? toR = options.contains(widget.to) ? widget.to : null;
+  bool sending = false;
+  String? err;
+
+  @override
+  void initState() {
+    super.initState();
+    f['name']!.text = Api.instance.userName == 'Xaridor' ? '' : Api.instance.userName;
+  }
+
+  @override
+  void dispose() {
+    for (final x in f.values) {
+      x.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> submit() async {
+    if (sending) return;
+    if (fromR == null || toR == null) {
+      setState(() => err = tr('Viloyatlarni tanlang'));
+      return;
+    }
+    setState(() {
+      sending = true;
+      err = null;
+    });
+    try {
+      await Api.instance.post('/api/cargo/orders', {
+        'carrierId': widget.carrier.id,
+        'fromRegion': fromR,
+        'toRegion': toR,
+        'cargo': f['cargo']!.text,
+        'weightKg': int.tryParse(f['weight']!.text) ?? 0,
+        'date': f['date']!.text,
+        'address': f['address']!.text,
+        'name': f['name']!.text,
+        'phone': f['phone']!.text,
+      });
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      // Xato oyna ichida ko'rsatiladi (bottom sheet ustida snackbar ko'rinmaydi)
+      if (mounted) {
+        setState(() {
+          sending = false;
+          err = e is ApiException ? e.message : tr("Serverga ulanib bo'lmadi. Internetni tekshiring.");
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    final c = widget.carrier;
+    // Taxminiy narx faqat filtrdagi yo'nalish uchun hisoblangan
+    final showEstimate = c.estimatedPrice != null && fromR == widget.from && toR == widget.to;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.of(context).viewInsets.bottom + 24),
+      child: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text(tr('Yuk mashinasi buyurtma qilish'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: -.4)),
+          const SizedBox(height: 4),
+          Text('${c.name} · ${cargoVehicleName(c.vehicleType)}${c.capacityKg > 0 ? ' · ${c.capacityKg} kg' : ''}', style: TextStyle(fontSize: 13, color: p.muted, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(child: _RegionBtn(tr('Qayerdan'), fromR, options, (v) => setState(() => fromR = v))),
+            const SizedBox(width: 8),
+            Expanded(child: _RegionBtn(tr('Qayerga'), toR, options, (v) => setState(() => toR = v))),
+          ]),
+          if (showEstimate) ...[
+            const SizedBox(height: 8),
+            Text("${tr('Taxminiy narx')}: ~ ${fmtPrice(c.estimatedPrice!)} so'm${c.routeKm != null ? ' · ${fmtKm(c.routeKm!)}' : ''}", style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: p.accentText)),
+          ],
+          const SizedBox(height: 10),
+          TextField(controller: f['cargo'], decoration: InputDecoration(labelText: tr('Yuk (nima tashiladi)'), prefixIcon: const Icon(Icons.inventory_2_outlined, size: 20))),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(child: TextField(controller: f['weight'], keyboardType: TextInputType.number, decoration: InputDecoration(labelText: tr("Og'irligi, kg"), prefixIcon: const Icon(Icons.scale_outlined, size: 20)))),
+            const SizedBox(width: 8),
+            Expanded(child: TextField(controller: f['date'], decoration: InputDecoration(labelText: tr('Sana'), hintText: '20.09', prefixIcon: const Icon(Icons.event_outlined, size: 20)))),
+          ]),
+          const SizedBox(height: 10),
+          TextField(controller: f['address'], decoration: InputDecoration(labelText: tr('Yuklash manzili'), prefixIcon: const Icon(Icons.place_outlined, size: 20))),
+          const SizedBox(height: 10),
+          TextField(controller: f['name'], decoration: InputDecoration(labelText: tr('Ismingiz'), prefixIcon: const Icon(Icons.person_outline_rounded, size: 20))),
+          const SizedBox(height: 10),
+          TextField(controller: f['phone'], keyboardType: TextInputType.phone, decoration: InputDecoration(labelText: tr('Telefon raqam'), hintText: '+998 90 123 45 67', prefixIcon: const Icon(Icons.phone_outlined, size: 20))),
+          if (err != null) Padding(padding: const EdgeInsets.only(top: 10), child: Text(err!, style: TextStyle(fontSize: 13, color: p.danger, fontWeight: FontWeight.w700))),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            icon: sending ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: p.muted)) : const Icon(Icons.local_shipping_rounded, size: 18),
+            label: Text(tr('Buyurtma berish')),
+            onPressed: sending ? null : submit,
+          ),
+          const SizedBox(height: 8),
+          Center(child: Text(tr("Tashuvchi siz bilan bog'lanib, narxni kelishib oladi"), style: TextStyle(fontSize: 12, color: p.muted))),
+        ]),
+      ),
+    );
+  }
+}
+
 class _FilterBtn extends StatelessWidget {
   final IconData icon;
   final String text;
@@ -236,8 +292,10 @@ class _RegionBtn extends StatelessWidget {
   const _RegionBtn(this.label, this.value, this.options, this.onChanged);
   @override
   Widget build(BuildContext context) => DropdownButtonFormField<String>(
-        value: options.contains(value) ? value : null,
+        key: ValueKey(value),
+        initialValue: options.contains(value) ? value : null,
         isExpanded: true,
+        hint: Text(tr('Tanlang'), overflow: TextOverflow.ellipsis),
         decoration: InputDecoration(labelText: label),
         items: [for (final r in options) DropdownMenuItem(value: r, child: Text(r, overflow: TextOverflow.ellipsis))],
         onChanged: (v) => v == null ? null : onChanged(v),
@@ -266,7 +324,12 @@ class _CarrierCard extends StatelessWidget {
                 Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(color: c.online ? p.successSoft : p.bg, borderRadius: BorderRadius.circular(99)), child: Text(c.online ? tr('Onlayn') : tr('Oflayn'), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: c.online ? p.success : p.muted))),
               ]),
               Text('${cargoVehicleName(c.vehicleType)}${c.capacityKg > 0 ? ' · ${c.capacityKg} kg' : ''}', style: TextStyle(fontSize: 12, color: p.muted, fontWeight: FontWeight.w600)),
-              Row(children: [Stars(c.rating, size: 14), const SizedBox(width: 6), Text('${c.rating.toStringAsFixed(1)} · ${c.deliveries} ${tr('reys')}', style: TextStyle(fontSize: 12, color: p.muted, fontWeight: FontWeight.w600))]),
+              // Reyting o'rniga haqiqiy bajarilgan reyslar soni
+              Row(children: [
+                Icon(Icons.local_shipping_outlined, size: 13, color: p.muted),
+                const SizedBox(width: 4),
+                Text(c.deliveries > 0 ? '${c.deliveries} ${tr('reys')}' : tr('Yangi'), style: TextStyle(fontSize: 12, color: p.muted, fontWeight: FontWeight.w600)),
+              ]),
             ]),
           ),
         ]),
@@ -281,6 +344,24 @@ class _CarrierCard extends StatelessWidget {
             const SizedBox(width: 6),
             Text([if (c.basePrice > 0) '${tr('dan')} ${fmtPrice(c.basePrice)} so\'m', if (c.pricePerKm > 0) '${fmtPrice(c.pricePerKm)} so\'m/km'].join(' · '), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: p.accentText)),
           ]),
+        ],
+        // Tanlangan yo'nalish uchun taxminiy narx va masofa
+        if (c.estimatedPrice != null || c.routeKm != null) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(color: p.accentSoft, borderRadius: BorderRadius.circular(12)),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.route_rounded, size: 16, color: p.accentText),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  [if (c.estimatedPrice != null) "~ ${fmtPrice(c.estimatedPrice!)} so'm", if (c.routeKm != null) fmtKm(c.routeKm!)].join(' · '),
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: p.text),
+                ),
+              ),
+            ]),
+          ),
         ],
         if (c.about.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 6), child: Text(c.about, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: p.text.withValues(alpha: .8)))),
         const SizedBox(height: 12),

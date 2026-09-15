@@ -49,3 +49,9 @@ app.*.map.json
 
 # Lokal sozlamalar (namuna: env.example.json)
 env.json
+
+# Onboarding bannerlarining asl nusxalari (ilova assets/onboarding/ dagi siqilgan webp fayllarni ishlatadi)
+Splash_Banners_UZ_RU_EN/
+
+# Render build: Flutter SDK render-build.sh orqali shu papkaga klon qilinadi
+/flutter/

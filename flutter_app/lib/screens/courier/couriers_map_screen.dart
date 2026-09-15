@@ -6,7 +6,6 @@ import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../api.dart';
 import '../../l10n.dart';
-import '../../main.dart';
 import '../../models.dart';
 import '../../theme.dart';
 import '../../widgets.dart';
@@ -161,6 +160,9 @@ class _CouriersMapScreenState extends State<CouriersMapScreen> {
 
 String _dist(double? km) => km == null ? '' : (km < 1 ? '${(km * 1000).round()} m' : '$km km');
 
+/// Reyting o'rniga: haqiqiy yetkazishlar soni (0 bo'lsa "Yangi")
+String _deliveriesText(Courier c) => c.deliveries > 0 ? '${c.deliveries} ${tr('yetkazish')}' : tr('Yangi');
+
 class _MiniCard extends StatelessWidget {
   final Courier c;
   final VoidCallback onTap;
@@ -185,7 +187,11 @@ class _MiniCard extends StatelessWidget {
               child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(c.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
                 Text('${vehicleName(c.vehicle)} · ${_dist(c.distanceKm)}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: p.muted, fontWeight: FontWeight.w600)),
-                Row(children: [const Icon(Icons.star_rounded, size: 14, color: Color(0xFFFFC53D)), Text(' ${c.rating.toStringAsFixed(1)} · ${c.deliveries} ${tr('yetkazish')}', style: TextStyle(fontSize: 11, color: p.muted, fontWeight: FontWeight.w600))]),
+                Row(children: [
+                  Icon(Icons.local_shipping_outlined, size: 13, color: p.muted),
+                  const SizedBox(width: 4),
+                  Expanded(child: Text(_deliveriesText(c), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: p.muted, fontWeight: FontWeight.w600))),
+                ]),
               ]),
             ),
           ]),
@@ -195,7 +201,7 @@ class _MiniCard extends StatelessWidget {
   }
 }
 
-/// Kuryer profili kartasi: nom, transport, reyting, masofa, qo'ng'iroq va yollash
+/// Kuryer profili kartasi: nom, transport, yetkazishlar soni, masofa, qo'ng'iroq va yollash
 class _CourierCard extends StatelessWidget {
   final Courier c;
   final VoidCallback onHire;
@@ -219,7 +225,11 @@ class _CourierCard extends StatelessWidget {
               ]),
               Text('${vehicleName(c.vehicle)}${c.distanceKm != null ? ' · ${_dist(c.distanceKm)}' : ''}', style: TextStyle(fontSize: 12, color: p.muted, fontWeight: FontWeight.w600)),
               GestureDetector(onTap: () => launchUrl(Uri.parse('tel:${c.phone}')), child: Row(children: [Icon(Icons.phone_rounded, size: 14, color: p.success), const SizedBox(width: 4), Text(c.phone, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: p.success))])),
-              Row(children: [Stars(c.rating, size: 14), const SizedBox(width: 6), Text('${c.rating.toStringAsFixed(1)} · ${c.deliveries} ${tr('yetkazish')}', style: TextStyle(fontSize: 12, color: p.muted, fontWeight: FontWeight.w600))]),
+              Row(children: [
+                Icon(Icons.local_shipping_outlined, size: 14, color: p.muted),
+                const SizedBox(width: 4),
+                Text(_deliveriesText(c), style: TextStyle(fontSize: 12, color: p.muted, fontWeight: FontWeight.w600)),
+              ]),
               if (c.about.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 4), child: Text(c.about, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: p.text.withValues(alpha: .8)))),
             ]),
           ),
@@ -239,59 +249,12 @@ class _CourierCard extends StatelessWidget {
 /// Kuryerga to'g'ridan-to'g'ri so'rov formasi (xaritadan va Sofia chatidan ishlatiladi)
 /// Yollash: do'kon buyurtmasi shart emas — qayerdan, qayerga, izoh va telefon yuboriladi, kuryer qo'ng'iroq qiladi
 Future<void> showHireCourierSheet(BuildContext context, Courier c, {LatLng? me}) async {
-  final f = {for (final k in ['from', 'to', 'note', 'name', 'phone']) k: TextEditingController()};
-  f['name']!.text = Api.instance.userName == 'Xaridor' ? '' : Api.instance.userName;
-  if (me != null) f['from']!.text = tr('Mening joyim') + ' (${me.latitude.toStringAsFixed(4)}, ${me.longitude.toStringAsFixed(4)})';
   final ok = await showModalBottomSheet<bool>(
     useRootNavigator: true,
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
-    builder: (ctx) => Padding(
-      padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.of(ctx).viewInsets.bottom + 24),
-      child: SingleChildScrollView(
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Row(children: [
-            ProviderAvatar(photo: c.photo, icon: providerIcon(c), role: 'courier', size: 44, online: true),
-            const SizedBox(width: 12),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(tr('Kuryerni yollash'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: -.4)),
-              Text('${c.name} · ${c.phone}', style: TextStyle(fontSize: 13, color: ctx.p.muted, fontWeight: FontWeight.w600)),
-            ])),
-          ]),
-          const SizedBox(height: 14),
-          TextField(controller: f['from'], decoration: InputDecoration(labelText: tr('Qayerdan olib ketsin'), prefixIcon: const Icon(Icons.trip_origin_rounded, size: 20))),
-          const SizedBox(height: 10),
-          TextField(controller: f['to'], decoration: InputDecoration(labelText: tr('Qayerga yetkazsin'), prefixIcon: const Icon(Icons.place_outlined, size: 20))),
-          const SizedBox(height: 10),
-          TextField(controller: f['note'], maxLines: 2, decoration: InputDecoration(labelText: tr('Nima yetkaziladi (izoh)'), prefixIcon: const Icon(Icons.inventory_2_outlined, size: 20))),
-          const SizedBox(height: 10),
-          TextField(controller: f['name'], decoration: InputDecoration(labelText: tr('Ismingiz'), prefixIcon: const Icon(Icons.person_outline_rounded, size: 20))),
-          const SizedBox(height: 10),
-          TextField(controller: f['phone'], keyboardType: TextInputType.phone, decoration: InputDecoration(labelText: tr('Telefon raqam'), hintText: '+998 90 123 45 67', prefixIcon: const Icon(Icons.phone_outlined, size: 20))),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            icon: const Icon(Icons.send_rounded, size: 18),
-            label: Text(tr("So'rov yuborish")),
-            onPressed: () async {
-              try {
-                await Api.instance.post('/api/courier-requests', {'courierId': c.id, 'from': f['from']!.text, 'to': f['to']!.text, 'note': f['note']!.text, 'name': f['name']!.text, 'phone': f['phone']!.text});
-                if (ctx.mounted) Navigator.pop(ctx, true);
-              } catch (e) {
-                if (ctx.mounted) showToast(ctx, e.toString(), error: true);
-              }
-            },
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(46), backgroundColor: ctx.p.successSoft, foregroundColor: ctx.p.success, side: BorderSide.none),
-            icon: const Icon(Icons.phone_rounded, size: 18),
-            label: Text('${tr("Qo'ng'iroq")}: ${c.phone}'),
-            onPressed: () => launchUrl(Uri.parse('tel:${c.phone}')),
-          ),
-        ]),
-      ),
-    ),
+    builder: (_) => _HireSheet(courier: c, me: me),
   );
   if (ok == true && context.mounted) {
     showDialog(
@@ -305,6 +268,104 @@ Future<void> showHireCourierSheet(BuildContext context, Courier c, {LatLng? me})
           OutlinedButton.icon(onPressed: () => launchUrl(Uri.parse('tel:${c.phone}')), icon: const Icon(Icons.phone_rounded, size: 16), label: Text(tr("Qo'ng'iroq"))),
           FilledButton(onPressed: () => Navigator.pop(d), child: Text(tr('Yopish'))),
         ],
+      ),
+    );
+  }
+}
+
+class _HireSheet extends StatefulWidget {
+  final Courier courier;
+  final LatLng? me;
+  const _HireSheet({required this.courier, this.me});
+  @override
+  State<_HireSheet> createState() => _HireSheetState();
+}
+
+class _HireSheetState extends State<_HireSheet> {
+  final f = {for (final k in ['from', 'to', 'note', 'name', 'phone']) k: TextEditingController()};
+  bool sending = false;
+  String? err;
+
+  @override
+  void initState() {
+    super.initState();
+    f['name']!.text = Api.instance.userName == 'Xaridor' ? '' : Api.instance.userName;
+    final me = widget.me;
+    if (me != null) f['from']!.text = '${tr('Mening joyim')} (${me.latitude.toStringAsFixed(4)}, ${me.longitude.toStringAsFixed(4)})';
+  }
+
+  @override
+  void dispose() {
+    for (final x in f.values) {
+      x.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> submit() async {
+    if (sending) return;
+    final c = widget.courier;
+    setState(() {
+      sending = true;
+      err = null;
+    });
+    try {
+      await Api.instance.post('/api/courier-requests', {'courierId': c.id, 'from': f['from']!.text, 'to': f['to']!.text, 'note': f['note']!.text, 'name': f['name']!.text, 'phone': f['phone']!.text});
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      // Xato oyna ichida ko'rsatiladi (bottom sheet ustida snackbar ko'rinmaydi)
+      if (mounted) {
+        setState(() {
+          sending = false;
+          err = e is ApiException ? e.message : tr("Serverga ulanib bo'lmadi. Internetni tekshiring.");
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    final c = widget.courier;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.of(context).viewInsets.bottom + 24),
+      child: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(children: [
+            ProviderAvatar(photo: c.photo, icon: providerIcon(c), role: 'courier', size: 44, online: true),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(tr('Kuryerni yollash'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: -.4)),
+                Text('${c.name} · ${c.phone}', style: TextStyle(fontSize: 13, color: p.muted, fontWeight: FontWeight.w600)),
+              ]),
+            ),
+          ]),
+          const SizedBox(height: 14),
+          TextField(controller: f['from'], decoration: InputDecoration(labelText: tr('Qayerdan olib ketsin'), prefixIcon: const Icon(Icons.trip_origin_rounded, size: 20))),
+          const SizedBox(height: 10),
+          TextField(controller: f['to'], decoration: InputDecoration(labelText: tr('Qayerga yetkazsin'), prefixIcon: const Icon(Icons.place_outlined, size: 20))),
+          const SizedBox(height: 10),
+          TextField(controller: f['note'], maxLines: 2, decoration: InputDecoration(labelText: tr('Nima yetkaziladi (izoh)'), prefixIcon: const Icon(Icons.inventory_2_outlined, size: 20))),
+          const SizedBox(height: 10),
+          TextField(controller: f['name'], decoration: InputDecoration(labelText: tr('Ismingiz'), prefixIcon: const Icon(Icons.person_outline_rounded, size: 20))),
+          const SizedBox(height: 10),
+          TextField(controller: f['phone'], keyboardType: TextInputType.phone, decoration: InputDecoration(labelText: tr('Telefon raqam'), hintText: '+998 90 123 45 67', prefixIcon: const Icon(Icons.phone_outlined, size: 20))),
+          if (err != null) Padding(padding: const EdgeInsets.only(top: 10), child: Text(err!, style: TextStyle(fontSize: 13, color: p.danger, fontWeight: FontWeight.w700))),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            icon: sending ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: p.muted)) : const Icon(Icons.send_rounded, size: 18),
+            label: Text(tr("So'rov yuborish")),
+            onPressed: sending ? null : submit,
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(46), backgroundColor: p.successSoft, foregroundColor: p.success, side: BorderSide.none),
+            icon: const Icon(Icons.phone_rounded, size: 18),
+            label: Text('${tr("Qo'ng'iroq")}: ${c.phone}'),
+            onPressed: () => launchUrl(Uri.parse('tel:${c.phone}')),
+          ),
+        ]),
       ),
     );
   }

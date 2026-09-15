@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -31,37 +32,101 @@ class ShopsScreen extends StatefulWidget {
 }
 
 class _ShopsScreenState extends State<ShopsScreen> {
+  /// Bir sahifada nechta do'kon yuklanadi
+  static const _pageSize = 20;
+
+  /// Tasodifiy tartib kaliti: ilova ochiq turganda bir xil, pastga tortib yangilanganda almashadi
+  static String _seed = '${DateTime.now().millisecondsSinceEpoch}';
+
+  final _scroll = ScrollController();
   List<Shop> shops = [];
   bool loading = true;
+  bool loadingMore = false;
+  bool hasMore = false;
   String q = '';
   String? error;
+  Timer? _debounce;
+  int _req = 0; // eskirgan javoblarni tashlab yuborish uchun
 
   @override
   void initState() {
     super.initState();
+    _scroll.addListener(_maybeLoadMore);
     load();
   }
 
-  Future<void> load() async {
-    final path = '/api/shops?q=${Uri.encodeComponent(q)}';
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  String _path(int offset) => '/api/shops?q=${Uri.encodeComponent(q)}&limit=$_pageSize&offset=$offset&seed=$_seed';
+
+  void _apply(dynamic r, {bool append = false}) {
+    // Yangi server: { items, hasMore, seed }. Eski server: oddiy massiv (sahifalashsiz).
+    final list = r is Map ? (r['items'] as List? ?? const []) : (r as List? ?? const []);
+    final items = list.map((e) => Shop.fromJson(e)).toList();
+    if (append) {
+      final seen = shops.map((s) => s.id).toSet();
+      shops = [...shops, ...items.where((s) => !seen.contains(s.id))];
+    } else {
+      shops = items;
+    }
+    hasMore = r is Map && r['hasMore'] == true && items.isNotEmpty;
+  }
+
+  /// Ro'yxat oxiriga yaqinlashganda (yoki birinchi sahifa ekranni to'ldirmasa) keyingi sahifa yuklanadi
+  void _maybeLoadMore() {
+    if (_scroll.hasClients && _scroll.position.extentAfter < 800) loadMore();
+  }
+
+  Future<void> load({bool reshuffle = false}) async {
+    if (reshuffle) _seed = '${DateTime.now().millisecondsSinceEpoch}';
+    final req = ++_req;
+    final path = _path(0);
     // Kesh bo'lsa darhol ko'rsatamiz, fonda yangilaymiz
     final cached = Api.instance.cached(path);
     if (cached != null) {
-      shops = (cached as List).map((e) => Shop.fromJson(e)).toList();
+      _apply(cached);
       loading = false;
     } else {
       loading = true;
     }
+    loadingMore = false;
     if (mounted) setState(() {});
     try {
       final r = await Api.instance.get(path);
-      shops = (r as List).map((e) => Shop.fromJson(e)).toList();
+      if (req != _req) return;
+      _apply(r);
       error = null;
     } catch (e) {
+      if (req != _req) return;
       error = e.toString();
       if (mounted && cached != null) showToast(context, error!, error: true);
     }
-    if (mounted) setState(() => loading = false);
+    if (!mounted) return;
+    setState(() => loading = false);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeLoadMore());
+  }
+
+  Future<void> loadMore() async {
+    if (loading || loadingMore || !hasMore) return;
+    final req = _req;
+    setState(() => loadingMore = true);
+    dynamic r;
+    try {
+      r = await Api.instance.get(_path(shops.length));
+    } catch (_) {
+      r = null; // tarmoq xatosi: foydalanuvchi yana pastga surganda qayta urinadi
+    }
+    if (!mounted || req != _req) return;
+    setState(() {
+      if (r != null) _apply(r, append: true);
+      loadingMore = false;
+    });
+    if (r != null) WidgetsBinding.instance.addPostFrameCallback((_) => _maybeLoadMore());
   }
 
   @override
@@ -70,91 +135,121 @@ class _ShopsScreenState extends State<ShopsScreen> {
     final st = AppState.instance;
     return Scaffold(
       body: RefreshIndicator(
-        onRefresh: load,
-        child: ListView(padding: const EdgeInsets.fromLTRB(20, 0, 20, navPad), children: [
-          SizedBox(height: MediaQuery.of(context).padding.top + 16),
-          Row(children: [
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(_greeting(), style: TextStyle(fontSize: 13, color: p.muted, fontWeight: FontWeight.w600)),
-                Text(Api.instance.userName == 'Xaridor' ? tr('Xaridor') : Api.instance.userName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -.5)),
-              ]),
-            ),
-            ListenableBuilder(
-              listenable: st,
-              // 6 ta tugma sig'ishi uchun biroz kichikroq (38) va zichroq
-              builder: (_, __) => Row(children: [
-                const LangBtn(size: 38),
-                const SizedBox(width: 6),
-                const ThemeBtn(size: 38),
-                const SizedBox(width: 6),
-                IconBtn(Icons.workspace_premium_rounded, size: 38, color: const Color(0xFFE0A100), onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RatingScreen()))),
-                const SizedBox(width: 6),
-                IconBtn(Icons.map_outlined, size: 38, onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MapScreen()))),
-                const SizedBox(width: 6),
-                IconBtn(Icons.favorite_border, size: 38, badge: st.favs.length, onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FavoritesScreen()))),
-                const SizedBox(width: 6),
-                IconBtn(Icons.shopping_cart_outlined, size: 38, badge: st.cartCount, onTap: () => openCart(context)),
-              ]),
-            ),
-          ]),
-          const SizedBox(height: 18),
-          SearchField(
-              hint: tr("Do'kon yoki mahsulot qidiring"),
-              onChanged: (v) {
-                q = v;
-                load();
-              }),
-          const SizedBox(height: 16),
-          DarkBanner(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.auto_awesome, size: 14, color: Color(0xFFC9D3FF)),
-                const SizedBox(width: 6),
-                Text(tr('SOFIA · AI YORDAMCHI'), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: .6, color: Color(0xFFC9D3FF))),
-              ]),
-              const SizedBox(height: 8),
-              SizedBox(
-                  width: 240,
-                  child: Text(tr("Nima kerakligini yozing — Sofia do'kon topib beradi"), style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w800, height: 1.2, letterSpacing: -.3))),
-              const SizedBox(height: 12),
-              Material(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                child: InkWell(
-                  onTap: () => Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(builder: (_) => const AssistantScreen(inTab: false))),
-                  borderRadius: BorderRadius.circular(12),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Text(tr('Chatni boshlash'), style: const TextStyle(color: Color(0xFF14161A), fontWeight: FontWeight.w700, fontSize: 13)),
-                      const SizedBox(width: 8),
-                      const Icon(Icons.arrow_forward, size: 16, color: Color(0xFF14161A))
+        // Pastga tortilsa do'konlar yangi tasodifiy tartibda keladi
+        onRefresh: () => load(reshuffle: true),
+        child: CustomScrollView(controller: _scroll, slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            sliver: SliverList(
+              delegate: SliverChildListDelegate([
+                SizedBox(height: MediaQuery.of(context).padding.top + 16),
+                LayoutBuilder(builder: (context, c) {
+                  final actions = ListenableBuilder(
+                    listenable: st,
+                    // 6 ta tugma sig'ishi uchun biroz kichikroq (38) va zichroq
+                    builder: (_, __) => Row(mainAxisSize: MainAxisSize.min, children: [
+                      const LangBtn(size: 38),
+                      const SizedBox(width: 6),
+                      const ThemeBtn(size: 38),
+                      const SizedBox(width: 6),
+                      IconBtn(Icons.workspace_premium_rounded, size: 38, color: const Color(0xFFE0A100), onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RatingScreen()))),
+                      const SizedBox(width: 6),
+                      IconBtn(Icons.map_outlined, size: 38, onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MapScreen()))),
+                      const SizedBox(width: 6),
+                      IconBtn(Icons.favorite_border, size: 38, badge: st.favs.length, onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FavoritesScreen()))),
+                      const SizedBox(width: 6),
+                      IconBtn(Icons.shopping_cart_outlined, size: 38, badge: st.cartCount, onTap: () => openCart(context)),
                     ]),
-                  ),
+                  );
+                  // Juda tor oynada (web, devtools yonida) tugmalar qatori toshib ketmasin: kichraytirib sig'diramiz
+                  final tight = c.maxWidth < 340;
+                  return Row(children: [
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(_greeting(), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: p.muted, fontWeight: FontWeight.w600)),
+                        Text(Api.instance.userName == 'Xaridor' ? tr('Xaridor') : Api.instance.userName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -.5)),
+                      ]),
+                    ),
+                    if (tight) Flexible(flex: 3, child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: actions)) else actions,
+                  ]);
+                }),
+                const SizedBox(height: 18),
+                SearchField(
+                    hint: tr("Do'kon yoki mahsulot qidiring"),
+                    onChanged: (v) {
+                      q = v;
+                      // Har harf uchun emas, yozish to'xtaganda so'rov yuboriladi
+                      _debounce?.cancel();
+                      _debounce = Timer(const Duration(milliseconds: 300), () => load());
+                    }),
+                const SizedBox(height: 16),
+                DarkBanner(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.auto_awesome, size: 14, color: Color(0xFFC9D3FF)),
+                      const SizedBox(width: 6),
+                      Flexible(child: Text(tr('SOFIA · AI YORDAMCHI'), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: .6, color: Color(0xFFC9D3FF)))),
+                    ]),
+                    const SizedBox(height: 8),
+                    ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 240),
+                        child: Text(tr("Nima kerakligini yozing — Sofia do'kon topib beradi"), style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w800, height: 1.2, letterSpacing: -.3))),
+                    const SizedBox(height: 12),
+                    Material(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      child: InkWell(
+                        onTap: () => Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(builder: (_) => const AssistantScreen(inTab: false))),
+                        borderRadius: BorderRadius.circular(12),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            Text(tr('Chatni boshlash'), style: const TextStyle(color: Color(0xFF14161A), fontWeight: FontWeight.w700, fontSize: 13)),
+                            const SizedBox(width: 8),
+                            const Icon(Icons.arrow_forward, size: 16, color: Color(0xFF14161A))
+                          ]),
+                        ),
+                      ),
+                    ),
+                  ]),
+                ),
+                const SizedBox(height: 12),
+                // Kategoriya kartochkalari — Sofia banneri ostida, o'sha qora-sariq dizaynda; surib qidiriladi
+                const CategoryStrip(),
+                SectionTitle(tr("Do'konlar"), action: tr('Xaritada'), onAction: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MapScreen()))),
+                if (loading)
+                  const GridSkeleton(count: 4, aspect: .86)
+                else if (error != null && shops.isEmpty)
+                  EmptyBox(Icons.cloud_off_rounded, "${tr("Serverga ulanib bo'lmadi")}\n$error",
+                      action: OutlinedButton.icon(onPressed: load, icon: const Icon(Icons.refresh_rounded, size: 18), label: Text(tr('Qayta urinish'))))
+                else if (shops.isEmpty)
+                  EmptyBox(Icons.storefront_outlined, tr("Do'kon topilmadi")),
+              ]),
+            ),
+          ),
+          // Do'kon kartochkalari faqat ekranga yaqinlashganda quriladi (ro'yxat qancha uzun bo'lsa ham tez)
+          if (!loading && shops.isNotEmpty)
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              sliver: SliverGrid(
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, mainAxisSpacing: 12, crossAxisSpacing: 12, childAspectRatio: .86),
+                delegate: SliverChildBuilderDelegate(
+                  (_, i) {
+                    final card = ShopCard(shops[i], onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ShopScreen(shops[i].id))));
+                    return i < _pageSize ? FadeIn(index: i, child: card) : card;
+                  },
+                  childCount: shops.length,
                 ),
               ),
-            ]),
-          ),
-          const SizedBox(height: 12),
-          // Kategoriya kartochkalari — Sofia banneri ostida, o'sha qora-sariq dizaynda; surib qidiriladi
-          const CategoryStrip(),
-          SectionTitle(tr("Do'konlar"), action: tr('Xaritada'), onAction: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MapScreen()))),
-          if (loading)
-            const GridSkeleton(count: 4, aspect: .86)
-          else if (error != null && shops.isEmpty)
-            EmptyBox(Icons.cloud_off_rounded, "${tr("Serverga ulanib bo'lmadi")}\n$error",
-                action: OutlinedButton.icon(onPressed: load, icon: const Icon(Icons.refresh_rounded, size: 18), label: Text(tr('Qayta urinish'))))
-          else if (shops.isEmpty)
-            EmptyBox(Icons.storefront_outlined, tr("Do'kon topilmadi"))
-          else
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, mainAxisSpacing: 12, crossAxisSpacing: 12, childAspectRatio: .86),
-              itemCount: shops.length,
-              itemBuilder: (_, i) => FadeIn(index: i, child: ShopCard(shops[i], onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ShopScreen(shops[i].id))))),
             ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, navPad),
+            sliver: SliverToBoxAdapter(
+              child: loadingMore
+                  ? const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5))))
+                  : const SizedBox.shrink(),
+            ),
+          ),
         ]),
       ),
     );
@@ -174,6 +269,10 @@ class _ShopScreenState extends State<ShopScreen> {
   List<Product> products = [];
   String q = '';
   String sort = 'new';
+  // Obuna: bosilganda darhol ko'rinadi, server javobi bilan tasdiqlanadi
+  bool? _following;
+  int? _followers;
+  bool followBusy = false;
 
   @override
   void initState() {
@@ -183,6 +282,8 @@ class _ShopScreenState extends State<ShopScreen> {
 
   void _apply(dynamic r) {
     shop = Shop.fromJson(r['shop']);
+    _following = null;
+    _followers = null;
     products = (r['products'] as List).map((e) => Product.fromJson(e)).toList();
     AppState.instance.chatShop = shop;
     AppState.instance.refresh();
@@ -197,6 +298,36 @@ class _ShopScreenState extends State<ShopScreen> {
       _apply(await Api.instance.get(path));
     } catch (e) {
       if (mounted && cached == null) showToast(context, e.toString(), error: true);
+    }
+  }
+
+  Future<void> _toggleFollow() async {
+    final s = shop;
+    if (s == null || followBusy) return;
+    final was = _following ?? s.following;
+    final count = _followers ?? s.followers;
+    setState(() {
+      followBusy = true;
+      _following = !was;
+      _followers = count + (was ? -1 : 1);
+    });
+    try {
+      final r = was ? await Api.instance.delete('/api/shops/${s.id}/follow') : await Api.instance.post('/api/shops/${s.id}/follow');
+      if (mounted && r is Map) {
+        setState(() {
+          _following = r['following'] == true;
+          _followers = (r['followers'] as num?)?.toInt() ?? _followers;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _following = was;
+        _followers = count;
+      });
+      showToast(context, e.toString(), error: true);
+    } finally {
+      if (mounted) setState(() => followBusy = false);
     }
   }
 
@@ -220,29 +351,6 @@ class _ShopScreenState extends State<ShopScreen> {
     final p = context.p;
     final st = AppState.instance;
     return Scaffold(
-      floatingActionButton: s == null
-          ? null
-          : Padding(
-              padding: const EdgeInsets.only(bottom: 84),
-              child: Material(
-                color: p.dark,
-                borderRadius: BorderRadius.circular(999),
-                elevation: 10,
-                shadowColor: Colors.black.withValues(alpha: .3),
-                child: InkWell(
-                  onTap: () => Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(builder: (_) => ChatScreen(shop: s))),
-                  borderRadius: BorderRadius.circular(999),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 14, 18, 14),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(Icons.chat_bubble_outline_rounded, size: 20, color: p.onDark),
-                      const SizedBox(width: 8),
-                      Text('${s.sellerName} ${tr('bilan chat')}', style: TextStyle(color: p.onDark, fontWeight: FontWeight.w700, fontSize: 14))
-                    ]),
-                  ),
-                ),
-              ),
-            ),
       body: s == null
           ? ListView(padding: const EdgeInsets.fromLTRB(20, 0, 20, navPad), children: [
               SizedBox(height: MediaQuery.of(context).padding.top + 12),
@@ -259,43 +367,69 @@ class _ShopScreenState extends State<ShopScreen> {
               Row(children: [
                 IconBtn(Icons.arrow_back_ios_new_rounded, onTap: () => Navigator.of(context).maybePop()),
                 const Spacer(),
+                if (s.lat != null) ...[
+                  IconBtn(Icons.map_outlined, onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => MapScreen(focus: [s])))),
+                  const SizedBox(width: 8),
+                ],
                 IconBtn(Icons.ios_share, onTap: () => shareShop(s)),
                 const SizedBox(width: 8),
                 ListenableBuilder(listenable: st, builder: (_, __) => IconBtn(Icons.shopping_cart_outlined, badge: st.cartCount, onTap: () => openCart(context))),
               ]),
               const SizedBox(height: 18),
+              // Instagram uslubidagi profil: rasm, ko'rsatkichlar, nom, obuna va xabar
               Row(children: [
-                ShopAvatar(s, size: 64, shadow: true),
-                const SizedBox(width: 14),
+                ShopAvatar(s, size: 80, shadow: true),
+                const SizedBox(width: 16),
                 Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(s.name, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -.4)),
-                    const SizedBox(height: 4),
-                    Row(children: [
-                      Container(width: 8, height: 8, decoration: BoxDecoration(color: p.success, shape: BoxShape.circle)),
-                      const SizedBox(width: 6),
-                      Expanded(
-                          child: Text('${s.sellerName} ${tr('onlayn')} · ${products.length} ${tr('ta mahsulot')}',
-                              maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: p.muted, fontWeight: FontWeight.w600))),
-                    ]),
-                    const SizedBox(height: 4),
-                    Row(children: [
-                      Stars(s.rating, size: 14),
-                      const SizedBox(width: 6),
-                      Expanded(
-                          child: Text('${s.rating.toStringAsFixed(1)} · ${trLevel(s.level)} · ${s.sales} ${tr('ta sotuv')}',
-                              maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: levelColor(s.level), fontWeight: FontWeight.w700))),
-                    ]),
+                  child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+                    _ProfileStat(value: '${products.length}', label: tr('Mahsulotlar')),
+                    _ProfileStat(value: _compactNum(_followers ?? s.followers), label: tr('Obunachilar')),
+                    _ProfileStat(value: '${s.sales}', label: tr('Sotuvlar')),
                   ]),
                 ),
-                if (s.lat != null) ...[
-                  IconBtn(Icons.map_outlined, onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => MapScreen(focus: [s])))),
-                  const SizedBox(width: 8)
-                ],
-                IconBtn(Icons.phone_outlined, bg: p.successSoft, color: p.success, size: 44, onTap: () => launchUrl(Uri.parse('tel:${s.phone}'))),
+              ]),
+              const SizedBox(height: 12),
+              Text(s.name, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: -.4)),
+              const SizedBox(height: 3),
+              Row(children: [
+                Stars(s.rating, size: 14),
+                const SizedBox(width: 6),
+                Expanded(
+                    child: Text('${s.rating.toStringAsFixed(1)} · ${trLevel(s.level)} · ${s.sellerName} ${tr('onlayn')}',
+                        maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12.5, color: levelColor(s.level), fontWeight: FontWeight.w700))),
               ]),
               if (s.description.isNotEmpty)
-                Padding(padding: const EdgeInsets.only(top: 10), child: Text(s.description, style: TextStyle(fontSize: 13, color: p.muted, fontWeight: FontWeight.w500, height: 1.5))),
+                Padding(padding: const EdgeInsets.only(top: 8), child: Text(s.description, style: TextStyle(fontSize: 13.5, color: p.text.withValues(alpha: .8), fontWeight: FontWeight.w500, height: 1.45))),
+              const SizedBox(height: 14),
+              Row(children: [
+                Expanded(
+                  child: (_following ?? s.following)
+                      ? OutlinedButton.icon(
+                          onPressed: followBusy ? null : _toggleFollow,
+                          style: OutlinedButton.styleFrom(minimumSize: const Size(0, 46), padding: const EdgeInsets.symmetric(horizontal: 10)),
+                          icon: const Icon(Icons.check_rounded, size: 18),
+                          label: Text(tr('Obunadasiz'), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        )
+                      : FilledButton.icon(
+                          onPressed: followBusy ? null : _toggleFollow,
+                          style: FilledButton.styleFrom(minimumSize: const Size(0, 46), padding: const EdgeInsets.symmetric(horizontal: 10)),
+                          icon: const Icon(Icons.person_add_alt_1_rounded, size: 18),
+                          label: Text(tr("Obuna bo'lish"), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  // Xabar do'konning AI sotuvchisi bilan chatni ochadi
+                  child: OutlinedButton.icon(
+                    onPressed: () => Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(builder: (_) => ChatScreen(shop: s))),
+                    style: OutlinedButton.styleFrom(minimumSize: const Size(0, 46), padding: const EdgeInsets.symmetric(horizontal: 10)),
+                    icon: const Icon(Icons.chat_bubble_outline_rounded, size: 18),
+                    label: Text(tr('Xabar'), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconBtn(Icons.phone_outlined, bg: p.successSoft, color: p.success, size: 46, onTap: () => launchUrl(Uri.parse('tel:${s.phone}'))),
+              ]),
               const SizedBox(height: 16),
               SearchField(hint: tr('Qidirish'), onChanged: (v) => setState(() => q = v)),
               const SizedBox(height: 12),
@@ -315,6 +449,20 @@ class _ShopScreenState extends State<ShopScreen> {
     );
   }
 }
+
+class _ProfileStat extends StatelessWidget {
+  final String value;
+  final String label;
+  const _ProfileStat({required this.value, required this.label});
+  @override
+  Widget build(BuildContext context) => Column(mainAxisSize: MainAxisSize.min, children: [
+        Text(value, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800, letterSpacing: -.3)),
+        const SizedBox(height: 2),
+        Text(label, style: TextStyle(fontSize: 12, color: context.p.muted, fontWeight: FontWeight.w600)),
+      ]);
+}
+
+String _compactNum(int n) => n >= 1000000 ? '${(n / 1000000).toStringAsFixed(1)}M' : n >= 10000 ? '${(n / 1000).toStringAsFixed(1)}K' : '$n';
 
 Future<void> _addToCart(BuildContext context, Product p) async {
   if (!AppState.instance.addToCart(p)) {
@@ -454,6 +602,8 @@ class _ProductScreenState extends State<ProductScreen> {
                     ]),
                   ),
                 ],
+                // Shu mahsulotga o'xshash mahsulotlar
+                RelatedProducts(p),
               ]),
             ),
           ),
@@ -565,8 +715,11 @@ void openCart(BuildContext context) {
 
 /// Buyurtma formasi
 void openOrderForm(BuildContext context, List<CartItem> items, {bool fromCart = false}) {
-  final name = TextEditingController(text: Api.instance.userName == 'Xaridor' ? '' : Api.instance.userName);
-  final phone = TextEditingController();
+  // Tasdiqlangan xaridor: ism va telefon hisobdan olinadi. Mehmon: "Buyurtma berish" bosilganda server hisob talab qiladi,
+  // tasdiqlash oynasi chiqadi (ism, familiya, telefon, telegram, email → email kodi), keyin buyurtma o'zi yuboriladi
+  final api = Api.instance;
+  final name = TextEditingController(text: api.registered ? '${api.firstName} ${api.lastName}'.trim() : api.userName == 'Xaridor' ? '' : api.userName);
+  final phone = TextEditingController(text: api.phone ?? '');
   final total = items.fold(0, (s, i) => s + i.product.price * i.qty);
   showModalBottomSheet(
     useRootNavigator: true,
@@ -670,4 +823,73 @@ class FavoritesScreen extends StatelessWidget {
           },
         ),
       );
+}
+
+/// Mahsulot sahifasi ostidagi o'xshash mahsulotlar (gorizontal suriladigan ro'yxat)
+class RelatedProducts extends StatefulWidget {
+  final Product p;
+  const RelatedProducts(this.p, {super.key});
+  @override
+  State<RelatedProducts> createState() => _RelatedProductsState();
+}
+
+class _RelatedProductsState extends State<RelatedProducts> {
+  List<(Product, Shop?)> items = [];
+  bool loading = true;
+
+  String get _path => '/api/products/${widget.p.id}/related?limit=12';
+
+  List<(Product, Shop?)> _parse(dynamic r) =>
+      ((r is Map ? r['items'] as List? : r as List?) ?? const []).map((e) => (Product.fromJson(e), e['shop'] == null ? null : Shop.fromJson(e['shop']))).toList();
+
+  @override
+  void initState() {
+    super.initState();
+    final cached = Api.instance.cached(_path);
+    if (cached != null) {
+      items = _parse(cached);
+      loading = false;
+    }
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final r = await Api.instance.get(_path);
+      items = _parse(r);
+    } catch (_) {
+      // O'xshash mahsulotlar qo'shimcha blok: xato bo'lsa shunchaki ko'rsatilmaydi
+    }
+    if (mounted) setState(() => loading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!loading && items.isEmpty) return const SizedBox.shrink();
+    const cardW = 162.0, cardH = 232.0; // do'kon sahifasidagi mahsulot kartochkasi nisbati (0.7)
+    return Padding(
+      padding: const EdgeInsets.only(top: 26),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(tr("O'xshash mahsulotlar"), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -.3)),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: cardH,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            clipBehavior: Clip.none,
+            itemCount: loading ? 3 : items.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemBuilder: (_, i) => SizedBox(
+              width: cardW,
+              child: loading
+                  ? const Skeleton(height: cardH, radius: 20)
+                  : FadeIn(
+                      index: i,
+                      child: ProductCard(items[i].$1, onTap: () => openProduct(context, items[i].$1, items[i].$2), onAdd: () => _addToCart(context, items[i].$1))),
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
 }

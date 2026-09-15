@@ -118,7 +118,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     if (!silent) setState(() => locating = true);
     try {
       if (!await Geolocator.isLocationServiceEnabled()) {
-        if (silent) return null;
+        if (silent || !mounted) return null;
         showToast(context, tr("Joylashuv xizmati o'chiq. Sozlamalardan yoqing."), error: true);
         await Geolocator.openLocationSettings();
         return null;
@@ -129,7 +129,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         perm = await Geolocator.requestPermission();
       }
       if (perm == LocationPermission.deniedForever) {
-        if (!silent) {
+        if (!silent && mounted) {
           showToast(context, tr('Joylashuvga ruxsat berilmadi'), error: true);
           await Geolocator.openAppSettings();
         }

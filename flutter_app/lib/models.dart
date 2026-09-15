@@ -20,6 +20,8 @@ class Shop {
   final double rating;
   final String level;
   final int? rank;
+  final int followers; // obunachilar soni
+  final bool following; // joriy foydalanuvchi obuna bo'lganmi
 
   Shop({
     required this.id,
@@ -39,6 +41,8 @@ class Shop {
     this.rating = 1,
     this.level = 'Yangi',
     this.rank,
+    this.followers = 0,
+    this.following = false,
   });
 
   factory Shop.fromJson(Map<String, dynamic> j) {
@@ -61,6 +65,8 @@ class Shop {
       productCount: (j['productCount'] ?? 0) as int,
       login: j['login'],
       ownerName: j['ownerName'],
+      followers: (j['followers'] as num?)?.toInt() ?? 0,
+      following: j['following'] == true,
     );
   }
 }
@@ -140,6 +146,16 @@ class Order {
   final String? deliveryStatus; // assigned | picked | delivered
   final double? shopLat;
   final double? shopLon;
+  // Xaridor manzili va yetkazish tafsilotlari
+  final String address;
+  final double? lat; // xaridor joylashuvi
+  final double? lon;
+  final int? deliveryFee; // kuryer tarifi bo'yicha yetkazish haqi, so'm
+  final double? routeKm; // do'kondan xaridorgacha taxminiy yo'l, km
+  final String courierName;
+  final String courierPhone;
+  final DateTime? pickedAt;
+  final DateTime? deliveredAt;
 
   Order({
     required this.id,
@@ -157,7 +173,18 @@ class Order {
     this.deliveryStatus,
     this.shopLat,
     this.shopLon,
+    this.address = '',
+    this.lat,
+    this.lon,
+    this.deliveryFee,
+    this.routeKm,
+    this.courierName = '',
+    this.courierPhone = '',
+    this.pickedAt,
+    this.deliveredAt,
   });
+
+  bool get hasLocation => lat != null && lon != null;
 
   factory Order.fromJson(Map<String, dynamic> j) => Order(
         id: j['id'] ?? j['_id'] ?? '',
@@ -175,6 +202,15 @@ class Order {
         deliveryStatus: j['deliveryStatus'],
         shopLat: (j['shopLocation'] is Map ? (j['shopLocation']['lat'] as num?) : null)?.toDouble(),
         shopLon: (j['shopLocation'] is Map ? (j['shopLocation']['lon'] as num?) : null)?.toDouble(),
+        address: j['address'] ?? '',
+        lat: (j['location'] is Map ? (j['location']['lat'] as num?) : null)?.toDouble(),
+        lon: (j['location'] is Map ? (j['location']['lon'] as num?) : null)?.toDouble(),
+        deliveryFee: (j['deliveryFee'] as num?)?.round(),
+        routeKm: (j['routeKm'] as num?)?.toDouble(),
+        courierName: j['courierName'] ?? '',
+        courierPhone: j['courierPhone'] ?? '',
+        pickedAt: DateTime.tryParse(j['pickedAt'] ?? ''),
+        deliveredAt: DateTime.tryParse(j['deliveredAt'] ?? ''),
       );
 
   String get statusLabel => const {'new': 'Yangi', 'done': 'Bajarildi', 'cancelled': 'Bekor'}[status] ?? status;
@@ -201,8 +237,11 @@ class Courier {
   final int deliveries;
   final double rating;
   final double? distanceKm;
-  Courier({required this.id, this.type = 'courier', required this.name, required this.phone, this.email = '', this.photo, this.vehicle = 'foot', this.vehicleType = '', this.capacityKg = 0, this.regions = const [], this.pricePerKm = 0, this.basePrice = 0, this.about = '', this.online = false, this.lat, this.lon, this.deliveries = 0, this.rating = 5, this.distanceKm});
+  final int? estimatedPrice; // yuk tashuvchi: tanlangan yo'nalish uchun taxminiy narx, so'm
+  final double? routeKm; // yuk tashuvchi: yo'nalish masofasi, km
+  Courier({required this.id, this.type = 'courier', required this.name, required this.phone, this.email = '', this.photo, this.vehicle = 'foot', this.vehicleType = '', this.capacityKg = 0, this.regions = const [], this.pricePerKm = 0, this.basePrice = 0, this.about = '', this.online = false, this.lat, this.lon, this.deliveries = 0, this.rating = 5, this.distanceKm, this.estimatedPrice, this.routeKm});
   bool get isCargo => type == 'cargo';
+  bool get hasTariff => basePrice > 0 || pricePerKm > 0;
 
   factory Courier.fromJson(Map<String, dynamic> j) {
     final loc = j['location'];
@@ -226,6 +265,8 @@ class Courier {
       deliveries: (j['deliveries'] as num?)?.toInt() ?? 0,
       rating: (j['rating'] as num?)?.toDouble() ?? 5,
       distanceKm: (j['distanceKm'] as num?)?.toDouble(),
+      estimatedPrice: (j['estimatedPrice'] as num?)?.round(),
+      routeKm: (j['routeKm'] as num?)?.toDouble(),
     );
   }
 
@@ -248,7 +289,12 @@ class CargoOrder {
   final String carrierName;
   final String carrierPhone;
   final DateTime createdAt;
-  CargoOrder({required this.id, required this.status, this.kind = 'cargo', required this.fromRegion, required this.toRegion, this.date = '', this.cargo = '', this.weightKg = 0, this.customerName = '', this.phone = '', this.address = '', this.carrierName = '', this.carrierPhone = '', required this.createdAt});
+  final int? price; // kelishilgan narx, so'm
+  final double? distanceKm; // viloyat markazlari orasidagi taxminiy yo'l
+  final int? suggestedPrice; // tashuvchi tarifi bo'yicha tavsiya narx
+  final DateTime? acceptedAt;
+  final DateTime? doneAt;
+  CargoOrder({required this.id, required this.status, this.kind = 'cargo', required this.fromRegion, required this.toRegion, this.date = '', this.cargo = '', this.weightKg = 0, this.customerName = '', this.phone = '', this.address = '', this.carrierName = '', this.carrierPhone = '', required this.createdAt, this.price, this.distanceKm, this.suggestedPrice, this.acceptedAt, this.doneAt});
   factory CargoOrder.fromJson(Map<String, dynamic> j) => CargoOrder(
         id: j['id'] ?? j['_id'] ?? '',
         status: j['status'] ?? 'new',
@@ -264,6 +310,11 @@ class CargoOrder {
         carrierName: j['carrierName'] ?? '',
         carrierPhone: j['carrierPhone'] ?? '',
         createdAt: DateTime.tryParse(j['createdAt'] ?? '') ?? DateTime.now(),
+        price: (j['price'] as num?)?.round(),
+        distanceKm: (j['distanceKm'] as num?)?.toDouble(),
+        suggestedPrice: (j['suggestedPrice'] as num?)?.round(),
+        acceptedAt: DateTime.tryParse(j['acceptedAt'] ?? ''),
+        doneAt: DateTime.tryParse(j['doneAt'] ?? ''),
       );
 }
 

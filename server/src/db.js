@@ -165,5 +165,112 @@ export async function migrate() {
   CREATE INDEX IF NOT EXISTS idx_chat_user ON chat_messages(user_id, scope);
   CREATE INDEX IF NOT EXISTS idx_views_shop ON product_views(shop_id, created_at);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_views_unique ON product_views(product_id, user_id);
+
+  -- Yetkazish va yuk: vaqtlar, masofa, haq (eski bazalarga ham qo'shiladi)
+  ALTER TABLE orders ADD COLUMN IF NOT EXISTS picked_at TIMESTAMPTZ;
+  ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ;
+  ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_fee BIGINT;
+  ALTER TABLE orders ADD COLUMN IF NOT EXISTS route_km DOUBLE PRECISION;
+  ALTER TABLE cargo_orders ADD COLUMN IF NOT EXISTS price BIGINT;
+  ALTER TABLE cargo_orders ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ;
+  ALTER TABLE cargo_orders ADD COLUMN IF NOT EXISTS done_at TIMESTAMPTZ;
+  CREATE INDEX IF NOT EXISTS idx_orders_courier ON orders(courier_id);
+  CREATE INDEX IF NOT EXISTS idx_cargo_carrier ON cargo_orders(carrier_id);
+  -- AI natijalari keshi
+  CREATE TABLE IF NOT EXISTS courier_advice (
+    courier_id TEXT PRIMARY KEY REFERENCES couriers(id) ON DELETE CASCADE,
+    tips JSONB NOT NULL DEFAULT '[]',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  -- Xaridor hisobi (majburiy ro'yxatdan o'tish), qiziqishlar profili
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS pass_hash TEXT;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS registered_at TIMESTAMPTZ;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS interests JSONB;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS interests_at TIMESTAMPTZ;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users(phone) WHERE phone IS NOT NULL;
+  -- Obunalar, layklar, Reels ko'rishlari, qidiruvlar
+  CREATE TABLE IF NOT EXISTS follows (
+    user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    shop_id TEXT NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, shop_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_follows_shop ON follows(shop_id);
+  CREATE TABLE IF NOT EXISTS product_likes (
+    user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, product_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_likes_product ON product_likes(product_id);
+  CREATE TABLE IF NOT EXISTS reel_events (
+    id SERIAL PRIMARY KEY,
+    user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    product_id TEXT NOT NULL,
+    dwell_ms INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS idx_reel_events_user ON reel_events(user_id, created_at);
+  CREATE TABLE IF NOT EXISTS user_searches (
+    id SERIAL PRIMARY KEY,
+    user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    q TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS idx_user_searches_user ON user_searches(user_id, created_at);
+  -- Takroriy mahsulotni aniqlash: normallashtirilgan nom va rasm xeshlari
+  ALTER TABLE products ADD COLUMN IF NOT EXISTS name_key TEXT;
+  ALTER TABLE products ADD COLUMN IF NOT EXISTS photo_hashes JSONB NOT NULL DEFAULT '{}';
+  CREATE INDEX IF NOT EXISTS idx_products_namekey ON products(shop_id, name_key);
+
+  CREATE TABLE IF NOT EXISTS shop_ai_summary (
+    shop_id TEXT PRIMARY KEY REFERENCES shops(id) ON DELETE CASCADE,
+    data JSONB NOT NULL DEFAULT '{}',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+
+  -- Ro'yxatdan o'tish: email orqali tasdiqlash kodlari (kodning o'zi emas, xeshi saqlanadi)
+  CREATE TABLE IF NOT EXISTS email_codes (
+    email TEXT NOT NULL,
+    purpose TEXT NOT NULL,
+    code_hash TEXT NOT NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    sent_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    sent_count INT NOT NULL DEFAULT 1,
+    window_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (email, purpose)
+  );
+  -- Xaridor: ism, familiya, telegram, tasdiqlangan email; admin bloklashi
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram TEXT;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked BOOLEAN NOT NULL DEFAULT false;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(lower(email)) WHERE email IS NOT NULL;
+  -- Sotuvchi: egasi, email, viloyat (AI sotuvchi ismi seller_name ustunida, bo'sh bo'lsa Madina)
+  ALTER TABLE shops ADD COLUMN IF NOT EXISTS first_name TEXT NOT NULL DEFAULT '';
+  ALTER TABLE shops ADD COLUMN IF NOT EXISTS last_name TEXT NOT NULL DEFAULT '';
+  ALTER TABLE shops ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '';
+  ALTER TABLE shops ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
+  ALTER TABLE shops ADD COLUMN IF NOT EXISTS region TEXT NOT NULL DEFAULT '';
+  -- Kuryer va yuk tashuvchi: ism, familiya, ish viloyati, davlat raqami
+  ALTER TABLE couriers ADD COLUMN IF NOT EXISTS first_name TEXT NOT NULL DEFAULT '';
+  ALTER TABLE couriers ADD COLUMN IF NOT EXISTS last_name TEXT NOT NULL DEFAULT '';
+  ALTER TABLE couriers ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
+  ALTER TABLE couriers ADD COLUMN IF NOT EXISTS region TEXT NOT NULL DEFAULT '';
+  ALTER TABLE couriers ADD COLUMN IF NOT EXISTS plate TEXT NOT NULL DEFAULT '';
+  ALTER TABLE couriers ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+  ALTER TABLE shops ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
   `);
+  // Supabase public jadvallarni Data API orqali tashqariga ochadi. RLS yoqilsa, u yerdan hech narsa o'qib bo'lmaydi.
+  // Server jadval egasi sifatida ulanadi, shuning uchun uning o'z so'rovlariga ta'sir qilmaydi.
+  await q(`DO $$ DECLARE t text; BEGIN
+    FOREACH t IN ARRAY ARRAY['users','sessions','shops','products','photos','orders','couriers','cargo_orders',
+      'notifications','chat_messages','shop_advice','product_views','logs','courier_advice','shop_ai_summary','follows','product_likes','reel_events','user_searches','email_codes'] LOOP
+      EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    END LOOP;
+  END $$;`);
 }

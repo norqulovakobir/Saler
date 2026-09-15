@@ -49,3 +49,11 @@ export const STATUS = {
   cancelled: { label: 'Bekor', tone: 'rose' },
 };
 export const VEHICLE = { foot: 'Piyoda', bike: 'Velosiped', moto: 'Mototsikl', car: 'Avtomobil' };
+export const VEHICLE_TYPE = { labo: 'Labo', damas: 'Damas', gazel: 'Gazel', isuzu: 'Isuzu', fura: 'Fura' };
+// Rollar: ilovadagi ro'yxatdan o'tish turlari
+export const ROLE = {
+  buyer: { label: 'Xaridor', tone: 'blue' },
+  seller: { label: 'Sotuvchi', tone: 'dark' },
+  courier: { label: 'Kuryer', tone: 'green' },
+  cargo: { label: 'Yuk tashuvchi', tone: 'amber' },
+};

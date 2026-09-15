@@ -1,11 +1,13 @@
 import { Router } from 'express';
 import os from 'node:os';
 import { q, one, all } from './db.js';
-import { ah, HttpError, newToken, pageArgs, str, num, day, logTail } from './util.js';
+import { ah, HttpError, newToken, pageArgs, str, num, logTail } from './util.js';
+import { storageEnabled } from './storage.js';
+import { aiInfo } from './ai.js';
+import { mailInfo } from './verify.js';
 
 const r = Router();
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin';
-const AI_MODEL = process.env.AI_MODEL || 'claude-opus-5';
 
 // ---- auth ----
 r.post('/login', ah(async (req, res) => {
@@ -30,8 +32,25 @@ const growth = (cur, prev) => (prev > 0 ? Math.round(((cur - prev) / prev) * 100
 const orderRow = (o) => ({
   id: o.id, shopId: o.shop_id, shop: o.shop_name, items: o.items, productName: o.product_name,
   customerName: o.customer_name, phone: o.phone, buyerId: o.user_id == null ? null : -o.user_id,
-  price: Number(o.price), status: o.status, createdAt: o.created_at,
+  price: Number(o.price), status: o.status, deliveryStatus: o.delivery_status, courierId: o.courier_id, createdAt: o.created_at,
 });
+const bool = (v) => (v === '1' || v === 'true' ? true : v === '0' || v === 'false' ? false : null);
+
+/** Do'konni bloklash/ochish. Bloklanganda sotuvchi sessiyalari yopiladi (login qayta ishlamaydi) */
+async function setShopActive(id, active) {
+  const s = await one('UPDATE shops SET active=$2 WHERE id=$1 RETURNING id', [id, active]);
+  if (!s) throw new HttpError(404, "Do'kon topilmadi");
+  if (!active) await q('UPDATE sessions SET shop_id=NULL WHERE shop_id=$1', [id]);
+}
+/** Kuryer/yuk tashuvchini bloklash/ochish. Bloklanganda oflayn qilinadi, sessiyalar yopiladi, boshlanmagan buyurtmalar bo'shatiladi */
+async function setCourierActive(id, active) {
+  const c = await one('UPDATE couriers SET active=$2, online = CASE WHEN $2 THEN online ELSE false END WHERE id=$1 RETURNING id', [id, active]);
+  if (!c) throw new HttpError(404, 'Kuryer topilmadi');
+  if (!active) {
+    await q('UPDATE sessions SET courier_id=NULL WHERE courier_id=$1', [id]);
+    await q("UPDATE orders SET courier_id=NULL, delivery_status=NULL WHERE courier_id=$1 AND delivery_status='assigned'", [id]);
+  }
+}
 
 // ---- dashboard ----
 r.get('/overview', ah(async (_req, res) => {
@@ -53,23 +72,40 @@ r.get('/overview', ah(async (_req, res) => {
     SELECT count(*)::int AS total,
       count(*) FILTER (WHERE created_at >= now() - interval '7 day')::int AS week,
       count(*) FILTER (WHERE created_at >= now() - interval '14 day' AND created_at < now() - interval '7 day')::int AS prev_week,
-      count(*) FILTER (WHERE lat IS NOT NULL)::int AS with_location
+      count(*) FILTER (WHERE lat IS NOT NULL)::int AS with_location,
+      count(*) FILTER (WHERE NOT active)::int AS blocked
     FROM shops`);
   const p = await one(`SELECT count(*)::int AS total, count(*) FILTER (WHERE active)::int AS active, coalesce(sum(views),0)::int AS views FROM products`);
-  const u = await one(`SELECT count(*)::int AS total, count(*) FILTER (WHERE last_seen >= now() - interval '7 day')::int AS active_week FROM users`);
-  const c = await one(`SELECT count(*)::int AS total, count(*) FILTER (WHERE online)::int AS online FROM couriers`);
+  const u = await one(`
+    SELECT count(*)::int AS total,
+      count(*) FILTER (WHERE registered_at IS NOT NULL)::int AS registered,
+      count(*) FILTER (WHERE registered_at >= now() - interval '7 day')::int AS reg_week,
+      count(*) FILTER (WHERE blocked)::int AS blocked,
+      count(*) FILTER (WHERE last_seen >= now() - interval '7 day')::int AS active_week
+    FROM users`);
+  const c = await one(`
+    SELECT count(*)::int AS total, count(*) FILTER (WHERE online)::int AS online,
+      count(*) FILTER (WHERE type='courier')::int AS couriers, count(*) FILTER (WHERE type='cargo')::int AS cargo,
+      count(*) FILTER (WHERE NOT active)::int AS blocked, count(*) FILTER (WHERE created_at >= now() - interval '7 day')::int AS week
+    FROM couriers`);
   const closed = o.s_done + o.s_cancelled;
   res.json({
     generatedAt: new Date().toISOString(),
     revenue: { total: Number(o.rev_total), week: Number(o.rev_week), growth: growth(Number(o.rev_week), Number(o.rev_prev_week)), avgOrder: Number(o.avg_order), today: Number(o.rev_today) },
     orders: { total: o.total, today: o.today, week: o.week, growth: growth(o.week, o.prev_week), status: { new: o.s_new, done: o.s_done, cancelled: o.s_cancelled } },
-    shops: { total: s.total, week: s.week, withLocation: s.with_location, growth: growth(s.week, s.prev_week) },
+    shops: { total: s.total, week: s.week, withLocation: s.with_location, blocked: s.blocked, growth: growth(s.week, s.prev_week) },
     products: { total: p.total, active: p.active, hidden: p.total - p.active, views: p.views },
-    users: { total: u.total + s.total, buyers: u.total, sellers: s.total, telegram: 0, app: u.total + s.total, activeWeek: u.active_week },
+    // Rollar: tasdiqlangan xaridorlar, mehmonlar (hisobsiz ko'rayotganlar), sotuvchilar, kuryerlar, yuk tashuvchilar
+    users: {
+      total: u.registered + s.total + c.total, buyers: u.registered, guests: u.total - u.registered, sellers: s.total, couriers: c.couriers, cargo: c.cargo,
+      blocked: u.blocked + s.blocked + c.blocked, regWeek: u.reg_week + s.week + c.week, activeWeek: u.active_week,
+      telegram: 0, app: u.registered + s.total + c.total,
+    },
     conversion: p.views > 0 ? Math.round((o.total / p.views) * 1000) / 10 : 0,
-    couriers: { total: c.total, online: c.online },
+    couriers: { total: c.total, online: c.online, couriers: c.couriers, cargo: c.cargo },
     doneRate: closed > 0 ? Math.round((o.s_done / closed) * 100) : 0,
     cancelRate: closed > 0 ? Math.round((o.s_cancelled / closed) * 100) : 0,
+    mail: mailInfo,
   });
 }));
 
@@ -82,7 +118,9 @@ r.get('/timeseries', ah(async (req, res) => {
       (SELECT count(*) FROM orders WHERE status='done' AND created_at::date=d.dt)::int AS done,
       (SELECT count(*) FROM orders WHERE status='cancelled' AND created_at::date=d.dt)::int AS cancelled,
       (SELECT count(*) FROM shops WHERE created_at::date=d.dt)::int AS shops,
-      (SELECT count(*) FROM products WHERE created_at::date=d.dt)::int AS products
+      (SELECT count(*) FROM products WHERE created_at::date=d.dt)::int AS products,
+      (SELECT count(*) FROM users WHERE registered_at::date=d.dt)::int AS buyers,
+      (SELECT count(*) FROM couriers WHERE created_at::date=d.dt)::int AS couriers
     FROM d ORDER BY d.dt`, [days]);
   res.json(rows.map((x) => ({ ...x, revenue: Number(x.revenue) })));
 }));
@@ -124,26 +162,36 @@ r.get('/analytics', ah(async (req, res) => {
     const x = await one(`SELECT count(*)::int AS n FROM (SELECT s.id, count(p.id) AS c FROM shops s LEFT JOIN products p ON p.shop_id=s.id GROUP BY s.id) t WHERE c >= $1 AND ($2::int IS NULL OR c < $2)`, [lo, hi]);
     shopSizes.push({ label, n: x.n });
   }
-  res.json({ hours, weekdays, monthly, topShops, topProducts, topViewed, topCustomers, priceBuckets, shopSizes });
+  // Viloyatlar bo'yicha do'konlar va kuryerlar
+  const regions = await all(`
+    SELECT r.region, coalesce(s.n,0)::int AS shops, coalesce(c.n,0)::int AS couriers, coalesce(c.cargo,0)::int AS cargo FROM (
+      SELECT region FROM shops WHERE region<>'' UNION SELECT region FROM couriers WHERE region<>'') r
+    LEFT JOIN (SELECT region, count(*) AS n FROM shops WHERE region<>'' GROUP BY 1) s ON s.region=r.region
+    LEFT JOIN (SELECT region, count(*) FILTER (WHERE type='courier') AS n, count(*) FILTER (WHERE type='cargo') AS cargo FROM couriers WHERE region<>'' GROUP BY 1) c ON c.region=r.region
+    ORDER BY shops DESC, couriers DESC`);
+  res.json({ hours, weekdays, monthly, topShops, topProducts, topViewed, topCustomers, priceBuckets, shopSizes, regions });
 }));
 
 // ---- shops ----
 r.get('/shops', ah(async (req, res) => {
   const { page, limit, offset } = pageArgs(req.query, 25);
   const qs = `%${str(req.query.q)}%`;
+  const active = bool(req.query.active);
   const order = req.query.sort === 'name' ? 's.name ASC' : 's.created_at DESC';
-  const where = `WHERE (s.name ILIKE $1 OR s.login ILIKE $1 OR s.phone ILIKE $1 OR s.owner_name ILIKE $1)`;
-  const total = (await one(`SELECT count(*)::int AS n FROM shops s ${where}`, [qs])).n;
+  const where = `WHERE (s.name ILIKE $1 OR s.login ILIKE $1 OR s.phone ILIKE $1 OR s.owner_name ILIKE $1 OR s.email ILIKE $1 OR s.region ILIKE $1) AND ($2::boolean IS NULL OR s.active=$2)`;
+  const total = (await one(`SELECT count(*)::int AS n FROM shops s ${where}`, [qs, active])).n;
   const items = (await all(`
-    SELECT s.id, s.name, s.logo, (s.lat IS NOT NULL) AS "hasLocation", s.login, s.owner_name AS "ownerName", s.phone, s.created_at AS "createdAt",
+    SELECT s.id, s.name, s.logo, (s.lat IS NOT NULL) AS "hasLocation", s.login, s.owner_name AS "ownerName", s.phone, s.email, s.region, s.active,
+      s.seller_name AS "aiName", s.created_at AS "createdAt", s.last_login_at AS "lastLoginAt",
       (SELECT count(*) FROM products p WHERE p.shop_id=s.id)::int AS products,
       (SELECT coalesce(sum(views),0) FROM products p WHERE p.shop_id=s.id)::int AS views,
       (SELECT count(*) FROM orders o WHERE o.shop_id=s.id)::int AS orders,
       (SELECT count(*) FROM orders o WHERE o.shop_id=s.id AND o.status='done')::int AS done,
       (SELECT coalesce(sum(price),0) FROM orders o WHERE o.shop_id=s.id AND o.status='done')::bigint AS revenue,
+      (SELECT count(*) FROM follows f WHERE f.shop_id=s.id)::int AS followers,
       1 AS sellers,
       (SELECT max(created_at) FROM orders o WHERE o.shop_id=s.id) AS "lastOrderAt"
-    FROM shops s ${where} ORDER BY ${order} LIMIT $2 OFFSET $3`, [qs, limit, offset])).map((x) => ({ ...x, revenue: Number(x.revenue) }));
+    FROM shops s ${where} ORDER BY ${order} LIMIT $3 OFFSET $4`, [qs, active, limit, offset])).map((x) => ({ ...x, revenue: Number(x.revenue) }));
   res.json({ total, page, limit, items });
 }));
 
@@ -155,19 +203,30 @@ r.get('/shops/:id', ah(async (req, res) => {
       count(*) FILTER (WHERE status='new')::int AS "newOrders", count(*) FILTER (WHERE status='done')::int AS "doneOrders"
     FROM orders WHERE shop_id=$1`, [s.id]);
   const pc = await one(`SELECT count(*)::int AS c, count(*) FILTER (WHERE NOT active)::int AS h, coalesce(sum(views),0)::int AS v FROM products WHERE shop_id=$1`, [s.id]);
+  const followers = (await one('SELECT count(*)::int AS n FROM follows WHERE shop_id=$1', [s.id])).n;
   const byDay = await all(`
     WITH d AS (SELECT generate_series((now() - interval '29 day')::date, now()::date, interval '1 day')::date AS dt)
     SELECT to_char(d.dt,'YYYY-MM-DD') AS date, (SELECT count(*) FROM orders WHERE shop_id=$1 AND created_at::date=d.dt)::int AS n FROM d ORDER BY d.dt`, [s.id]);
   const products = await all(`SELECT id, name, photos, active, price::bigint AS price, views, created_at AS "createdAt" FROM products WHERE shop_id=$1 ORDER BY created_at DESC`, [s.id]);
-  const orders = (await all(`SELECT * FROM orders WHERE shop_id=$1 ORDER BY created_at DESC LIMIT 100`, [s.id])).map(orderRow);
+  const orders = (await all(`SELECT o.*, s.name AS shop_name FROM orders o JOIN shops s ON s.id=o.shop_id WHERE o.shop_id=$1 ORDER BY o.created_at DESC LIMIT 100`, [s.id])).map(orderRow);
   res.json({
-    shop: { id: s.id, name: s.name, login: s.login, logo: s.logo, ownerName: s.owner_name, sellerName: s.seller_name, createdAt: s.created_at, phone: s.phone, description: s.description, location: s.lat != null ? { lat: s.lat, lon: s.lon, address: s.address } : null },
-    stats: { revenue: Number(st.revenue), totalOrders: st.totalOrders, newOrders: st.newOrders, doneOrders: st.doneOrders, productCount: pc.c, hiddenCount: pc.h, views: pc.v },
+    shop: {
+      id: s.id, name: s.name, login: s.login, logo: s.logo, ownerName: s.owner_name, firstName: s.first_name, lastName: s.last_name, sellerName: s.seller_name,
+      createdAt: s.created_at, lastLoginAt: s.last_login_at, phone: s.phone, email: s.email, emailVerified: !!s.email_verified_at, region: s.region, active: s.active,
+      description: s.description, location: s.lat != null ? { lat: s.lat, lon: s.lon, address: s.address } : null,
+    },
+    stats: { revenue: Number(st.revenue), totalOrders: st.totalOrders, newOrders: st.newOrders, doneOrders: st.doneOrders, productCount: pc.c, hiddenCount: pc.h, views: pc.v, followers },
     byDay,
     sellers: [{ id: s.login, name: s.owner_name || s.name, username: s.login, owner: true, lang: 'uz' }],
     products: products.map((p) => ({ ...p, price: Number(p.price) })),
     orders,
   });
+}));
+
+r.patch('/shops/:id', ah(async (req, res) => {
+  if (typeof req.body?.active !== 'boolean') throw new HttpError(400, 'active: true/false');
+  await setShopActive(req.params.id, req.body.active);
+  res.json({ ok: true });
 }));
 
 r.delete('/shops/:id', ah(async (req, res) => {
@@ -179,7 +238,7 @@ r.delete('/shops/:id', ah(async (req, res) => {
 r.get('/products', ah(async (req, res) => {
   const { page, limit, offset } = pageArgs(req.query, 30);
   const qs = `%${str(req.query.q)}%`;
-  const active = req.query.active === '1' ? true : req.query.active === '0' ? false : null;
+  const active = bool(req.query.active);
   const order = { views: 'p.views DESC', price: 'p.price DESC', priceAsc: 'p.price ASC' }[req.query.sort] || 'p.created_at DESC';
   const where = `WHERE (p.name ILIKE $1 OR s.name ILIKE $1) AND ($2::boolean IS NULL OR p.active=$2)`;
   const total = (await one(`SELECT count(*)::int AS n FROM products p JOIN shops s ON s.id=p.shop_id ${where}`, [qs, active])).n;
@@ -219,20 +278,34 @@ r.patch('/orders/:id', ah(async (req, res) => {
   res.json({ ok: true });
 }));
 
-// ---- couriers ----
+// ---- couriers (kuryer va yuk tashuvchi) ----
 r.get('/couriers', ah(async (req, res) => {
   const { page, limit, offset } = pageArgs(req.query, 30);
   const qs = `%${str(req.query.q)}%`;
   const online = req.query.online === '1' ? true : null;
-  const where = `WHERE (c.name ILIKE $1 OR c.login ILIKE $1 OR c.phone ILIKE $1) AND ($2::boolean IS NULL OR c.online=$2)`;
-  const total = (await one(`SELECT count(*)::int AS n FROM couriers c ${where}`, [qs, online])).n;
-  const onlineCount = (await one(`SELECT count(*)::int AS n FROM couriers WHERE online`)).n;
+  const type = ['courier', 'cargo'].includes(req.query.type) ? req.query.type : null;
+  const active = bool(req.query.active);
+  const where = `WHERE (c.name ILIKE $1 OR c.login ILIKE $1 OR c.phone ILIKE $1 OR c.email ILIKE $1 OR c.plate ILIKE $1 OR c.region ILIKE $1)
+    AND ($2::boolean IS NULL OR c.online=$2) AND ($3::text IS NULL OR c.type=$3) AND ($4::boolean IS NULL OR c.active=$4)`;
+  const total = (await one(`SELECT count(*)::int AS n FROM couriers c ${where}`, [qs, online, type, active])).n;
+  const counts = await one(`SELECT count(*) FILTER (WHERE online)::int AS online, count(*) FILTER (WHERE type='courier')::int AS couriers, count(*) FILTER (WHERE type='cargo')::int AS cargo, count(*) FILTER (WHERE NOT active)::int AS blocked FROM couriers`);
   const items = (await all(`
-    SELECT c.id, c.name, c.login, c.phone, c.online, c.vehicle, c.deliveries, c.rating, c.lat, c.lon, c.location_at, c.created_at AS "createdAt",
-      (SELECT count(*) FROM orders o WHERE o.courier_id=c.id AND o.delivery_status IN ('assigned','picked'))::int AS "activeOrders"
-    FROM couriers c ${where} ORDER BY c.online DESC, c.created_at DESC LIMIT $3 OFFSET $4`, [qs, online, limit, offset]))
-    .map(({ lat, lon, location_at, ...c }) => ({ ...c, location: lat != null ? { lat, lon, updatedAt: location_at } : null }));
-  res.json({ total, online: onlineCount, page, limit, items });
+    SELECT c.id, c.type, c.name, c.login, c.phone, c.email, (c.email_verified_at IS NOT NULL) AS "emailVerified", c.online, c.active,
+      c.vehicle, c.vehicle_type AS "vehicleType", c.plate, c.region, c.regions, c.capacity_kg AS "capacityKg", c.base_price AS "basePrice", c.price_per_km AS "pricePerKm",
+      c.deliveries, c.rating, c.lat, c.lon, c.location_at, c.created_at AS "createdAt", c.last_login_at AS "lastLoginAt",
+      (SELECT count(*) FROM orders o WHERE o.courier_id=c.id AND o.delivery_status IN ('assigned','picked'))::int AS "activeOrders",
+      (SELECT coalesce(sum(delivery_fee),0) FROM orders o WHERE o.courier_id=c.id AND o.delivery_status='delivered')::bigint AS earnings,
+      (SELECT count(*) FROM cargo_orders x WHERE x.carrier_id=c.id AND x.status='done')::int AS "cargoDone",
+      (SELECT count(*) FROM cargo_orders x WHERE x.carrier_id=c.id AND x.status NOT IN ('done','cancelled'))::int AS "cargoActive"
+    FROM couriers c ${where} ORDER BY c.online DESC, c.created_at DESC LIMIT $5 OFFSET $6`, [qs, online, type, active, limit, offset]))
+    .map(({ lat, lon, location_at, ...c }) => ({ ...c, earnings: Number(c.earnings), location: lat != null ? { lat, lon, updatedAt: location_at } : null }));
+  res.json({ total, online: counts.online, couriers: counts.couriers, cargo: counts.cargo, blocked: counts.blocked, page, limit, items });
+}));
+
+r.patch('/couriers/:id', ah(async (req, res) => {
+  if (typeof req.body?.active !== 'boolean') throw new HttpError(400, 'active: true/false');
+  await setCourierActive(req.params.id, req.body.active);
+  res.json({ ok: true });
 }));
 
 r.delete('/couriers/:id', ah(async (req, res) => {
@@ -241,29 +314,65 @@ r.delete('/couriers/:id', ah(async (req, res) => {
   res.json({ ok: true });
 }));
 
-// ---- users ----
+// ---- users: barcha rollar bitta ro'yxatda ----
+// buyer (users jadvali: tasdiqlangan xaridor yoki mehmon), seller (shops), courier / cargo (couriers)
+const USERS_SQL = `
+  SELECT * FROM (
+    SELECT ('u' || u.id) AS id, coalesce(nullif(trim(coalesce(u.first_name,'') || ' ' || coalesce(u.last_name,'')), ''), u.name) AS name,
+      NULL::text AS username, 'buyer' AS role, u.phone, u.email, u.telegram,
+      (u.email_verified_at IS NOT NULL) AS verified, u.blocked, (u.registered_at IS NOT NULL) AS registered,
+      NULL::text AS "shopId", NULL::text AS shop, NULL::text AS region,
+      (SELECT count(*) FROM orders o WHERE o.user_id=u.id)::int AS orders,
+      (SELECT coalesce(sum(price),0) FROM orders o WHERE o.user_id=u.id AND o.status='done')::bigint AS spent,
+      u.last_seen AS "lastActivity", u.created_at
+    FROM users u
+    UNION ALL
+    SELECT s.id, coalesce(nullif(trim(s.first_name || ' ' || s.last_name), ''), s.owner_name), s.login, 'seller', nullif(s.phone,''), nullif(s.email,''), NULL::text,
+      (s.email_verified_at IS NOT NULL), NOT s.active, true, s.id, s.name, nullif(s.region,''),
+      (SELECT count(*) FROM orders o WHERE o.shop_id=s.id)::int,
+      (SELECT coalesce(sum(price),0) FROM orders o WHERE o.shop_id=s.id AND o.status='done')::bigint,
+      coalesce(s.last_login_at, (SELECT max(created_at) FROM orders o WHERE o.shop_id=s.id)), s.created_at
+    FROM shops s
+    UNION ALL
+    SELECT c.id, c.name, c.login, c.type, nullif(c.phone,''), nullif(c.email,''), NULL::text,
+      (c.email_verified_at IS NOT NULL), NOT c.active, true, NULL::text, NULL::text, nullif(c.region,''),
+      (SELECT count(*) FROM orders o WHERE o.courier_id=c.id AND o.delivery_status='delivered')::int,
+      (SELECT coalesce(sum(delivery_fee),0) FROM orders o WHERE o.courier_id=c.id AND o.delivery_status='delivered')::bigint,
+      coalesce(c.last_login_at, c.location_at), c.created_at
+    FROM couriers c
+  ) t
+  WHERE (coalesce(t.name,'') ILIKE $1 OR coalesce(t.username,'') ILIKE $1 OR coalesce(t.shop,'') ILIKE $1 OR coalesce(t.phone,'') ILIKE $1 OR coalesce(t.email,'') ILIKE $1 OR coalesce(t.telegram,'') ILIKE $1)
+    AND ($2::text IS NULL OR t.role=$2)
+    AND ($3::text IS NULL OR ($3='blocked' AND t.blocked) OR ($3='guest' AND NOT t.registered) OR ($3='registered' AND t.registered AND NOT t.blocked))`;
+
 r.get('/users', ah(async (req, res) => {
   const { page, limit, offset } = pageArgs(req.query, 30);
   const qs = `%${str(req.query.q)}%`;
-  const role = ['buyer', 'seller'].includes(req.query.role) ? req.query.role : null;
+  const role = ['buyer', 'seller', 'courier', 'cargo'].includes(req.query.role) ? req.query.role : null;
+  const status = ['blocked', 'guest', 'registered'].includes(req.query.status) ? req.query.status : null;
   if (req.query.source === 'telegram') return res.json({ total: 0, page, limit, items: [] });
-  const sql = `
-    SELECT * FROM (
-      SELECT ('u' || u.id) AS id, u.name, NULL::text AS username, 'buyer' AS role, 'app' AS source, 'uz' AS lang, NULL::text AS "shopId", NULL::text AS shop,
-        (SELECT count(*) FROM orders o WHERE o.user_id=u.id)::int AS orders,
-        (SELECT coalesce(sum(price),0) FROM orders o WHERE o.user_id=u.id AND o.status='done')::bigint AS spent,
-        u.last_seen AS "lastActivity", u.created_at
-      FROM users u
-      UNION ALL
-      SELECT s.id, s.owner_name, s.login, 'seller', 'app', 'uz', s.id, s.name,
-        (SELECT count(*) FROM orders o WHERE o.shop_id=s.id)::int,
-        (SELECT coalesce(sum(price),0) FROM orders o WHERE o.shop_id=s.id AND o.status='done')::bigint,
-        (SELECT max(created_at) FROM orders o WHERE o.shop_id=s.id), s.created_at
-      FROM shops s
-    ) t WHERE (coalesce(t.name,'') ILIKE $1 OR coalesce(t.username,'') ILIKE $1 OR coalesce(t.shop,'') ILIKE $1) AND ($2::text IS NULL OR t.role=$2)`;
-  const total = (await one(`SELECT count(*)::int AS n FROM (${sql}) x`, [qs, role])).n;
-  const items = (await all(`${sql} ORDER BY t.created_at DESC LIMIT $3 OFFSET $4`, [qs, role, limit, offset])).map(({ created_at, ...x }) => ({ ...x, spent: Number(x.spent) }));
+  const total = (await one(`SELECT count(*)::int AS n FROM (${USERS_SQL}) x`, [qs, role, status])).n;
+  const items = (await all(`${USERS_SQL} ORDER BY t.created_at DESC LIMIT $4 OFFSET $5`, [qs, role, status, limit, offset]))
+    .map(({ created_at, ...x }) => ({ ...x, source: 'app', lang: 'uz', spent: Number(x.spent), createdAt: created_at }));
   res.json({ total, page, limit, items });
+}));
+
+// Bloklash: xaridor (u123) → users.blocked; sotuvchi (s_...) → shops.active; kuryer (c_...) → couriers.active
+r.patch('/users/:id', ah(async (req, res) => {
+  const blocked = req.body?.blocked;
+  if (typeof blocked !== 'boolean') throw new HttpError(400, 'blocked: true/false');
+  const id = req.params.id;
+  if (/^u\d+$/.test(id)) {
+    const u = await one('UPDATE users SET blocked=$2 WHERE id=$1 RETURNING id', [Number(id.slice(1)), blocked]);
+    if (!u) throw new HttpError(404, 'Foydalanuvchi topilmadi');
+  } else if (await one('SELECT 1 FROM shops WHERE id=$1', [id])) {
+    await setShopActive(id, !blocked);
+  } else if (await one('SELECT 1 FROM couriers WHERE id=$1', [id])) {
+    await setCourierActive(id, !blocked);
+  } else {
+    throw new HttpError(404, 'Foydalanuvchi topilmadi');
+  }
+  res.json({ ok: true });
 }));
 
 // ---- system ----
@@ -277,15 +386,18 @@ r.get('/system', ah(async (_req, res) => {
     db = { dataSize: Number(d.size), objects: Number(objects.n), collections: d.tables };
   } catch { /* db yo'q */ }
   const up = await one(`SELECT count(*)::int AS files, coalesce(sum(length(data)),0)::bigint AS bytes FROM photos`);
+  // Email kodlari: oxirgi soatda yuborilgan va hozir kutilayotganlar
+  const codes = await one(`SELECT count(*)::int AS pending, count(*) FILTER (WHERE sent_at >= now() - interval '1 hour')::int AS hour FROM email_codes WHERE expires_at > now()`).catch(() => ({ pending: 0, hour: 0 }));
   res.json({
     time: new Date().toISOString(),
     uptime: Math.round((Date.now() - startedAt) / 1000),
     node: process.version,
     memory: { rss: mem.rss, heapUsed: mem.heapUsed, heapTotal: mem.heapTotal },
     db,
-    uploads: { files: up.files, bytes: Number(up.bytes) },
+    uploads: { files: up.files, bytes: Number(up.bytes), storage: storageEnabled ? 'supabase' : 'postgres' },
     bot: null,
-    env: { groqModel: process.env.ANTHROPIC_API_KEY ? AI_MODEL : "AI kaliti yo'q", visionModel: process.env.ANTHROPIC_API_KEY ? AI_MODEL : '—', redis: false, port: process.env.PORT || 3000, webappUrl: process.env.ADMIN_URL || null },
+    mail: { ...mailInfo, serviceId: process.env.EMAILJS_SERVICE_ID || null, templateId: process.env.EMAILJS_TEMPLATE_ID || null, publicKey: !!process.env.EMAILJS_PUBLIC_KEY, codesPending: codes.pending, codesHour: codes.hour },
+    env: { groqModel: aiInfo.model ? `${aiInfo.model} (${aiInfo.provider})` : "AI kaliti yo'q", visionModel: aiInfo.model || '—', redis: false, port: process.env.PORT || 3000, webappUrl: process.env.ADMIN_URL || null, nodeEnv: process.env.NODE_ENV || 'development' },
     platform: process.platform,
     cpuLoad: os.loadavg(),
     logTail: logTail(40),

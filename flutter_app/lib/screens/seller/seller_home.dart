@@ -37,7 +37,15 @@ class _SellerHomeState extends State<SellerHome> {
   @override
   Widget build(BuildContext context) {
     final st = AppState.instance;
-    final roots = [AnalyticsTab(onExit: widget.onExit), OrdersTab(onExit: widget.onExit), AdviceTab(onExit: widget.onExit), ProductsTab(onExit: widget.onExit), ProfileTab(onExit: widget.onExit)];
+    final p = context.p;
+    final roots = [
+      // "Yangi buyurtmalarni ko'rish" ikkinchi sahifa ochmaydi — shu yerda Buyurtmalar tabiga o'tadi
+      AnalyticsTab(onExit: widget.onExit, onOpenOrders: () => setState(() => index = 1)),
+      OrdersTab(onExit: widget.onExit),
+      AdviceTab(onExit: widget.onExit),
+      ProductsTab(onExit: widget.onExit),
+      ProfileTab(onExit: widget.onExit),
+    ];
     final pages = [for (var i = 0; i < roots.length; i++) TabNavigator(key: ValueKey('s$i${L10n.lang.name}'), navKey: keys[i], root: roots[i])];
     return ListenableBuilder(
       listenable: st,
@@ -50,7 +58,17 @@ class _SellerHomeState extends State<SellerHome> {
         },
         child: Scaffold(
           extendBody: true,
-          body: IndexedStack(index: index, children: pages),
+          body: Stack(fit: StackFit.expand, children: [
+            IndexedStack(index: index, children: pages),
+            // Status bar shaffof: aylantirilgan kontent soat/batareya ostida ko'rinmasin — tepada fon rangli parda
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: MediaQuery.of(context).padding.top,
+              child: IgnorePointer(child: ColoredBox(color: p.bg.withValues(alpha: .96))),
+            ),
+          ]),
           bottomNavigationBar: FloatingNav(
             index: index,
             badges: {1: st.newOrders},
@@ -97,6 +115,17 @@ class SellerHeader extends StatelessWidget {
   }
 }
 
+/// Xato matnini foydalanuvchiga ko'rsatish uchun tozalaydi: server xabari, "Exception: " prefiksisiz yoki tarmoq xatosi
+String sellerErrorText(Object e) {
+  if (e is ApiException) return e.message;
+  final s = e.toString();
+  if (s.startsWith('Exception: ')) return s.substring('Exception: '.length);
+  if (s.contains('SocketException') || s.contains('ClientException') || s.contains('TimeoutException') || s.contains('HandshakeException')) {
+    return tr("Serverga ulanib bo'lmadi. Internetni tekshiring.");
+  }
+  return s;
+}
+
 // ---- Buyurtmalar ----
 class OrdersTab extends StatefulWidget {
   final VoidCallback? onExit;
@@ -109,34 +138,253 @@ class _OrdersTabState extends State<OrdersTab> {
   String filter = 'new';
   List<Order> orders = [];
   bool loading = true;
+  String? error;
+  String? busyId; // holati o'zgartirilayotgan buyurtma — tugmalari vaqtincha o'chadi
+  int _lastNew = AppState.instance.newOrders;
 
   @override
   void initState() {
     super.initState();
+    final cached = Api.instance.cached('/api/seller/orders');
+    if (cached is List) {
+      orders = cached.map((e) => Order.fromJson(e)).toList();
+      loading = false;
+    }
+    AppState.instance.addListener(_onAppState);
     load();
   }
 
-  Future<void> load() async {
-    final cached = Api.instance.cached('/api/seller/orders');
-    if (cached != null) {
-      orders = (cached as List).map((e) => Order.fromJson(e)).toList();
-      loading = false;
-      if (mounted) setState(() {});
+  @override
+  void dispose() {
+    AppState.instance.removeListener(_onAppState);
+    super.dispose();
+  }
+
+  // Yangi buyurtmalar soni oshsa yoki jonli hodisa kelsa (buyurtma, kuryer holati, pul) ro'yxat joyida yangilanadi
+  int _seenLive = AppState.instance.liveVersion;
+  void _onAppState() {
+    final st = AppState.instance;
+    final n = st.newOrders;
+    var reload = n > _lastNew;
+    _lastNew = n;
+    if (st.liveVersion != _seenLive) {
+      _seenLive = st.liveVersion;
+      final t = st.lastEvent?.type ?? '';
+      if (t.startsWith('order:') || t == 'money') reload = true;
     }
+    if (reload) load();
+  }
+
+  Future<void> load() async {
     try {
-      orders = ((await Api.instance.get('/api/seller/orders')) as List).map((e) => Order.fromJson(e)).toList();
-    } catch (_) {}
-    if (mounted) setState(() => loading = false);
+      final r = await Api.instance.get('/api/seller/orders');
+      if (!mounted) return;
+      setState(() {
+        orders = (r as List).map((e) => Order.fromJson(e)).toList();
+        error = null;
+        loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        error = sellerErrorText(e);
+        loading = false;
+      });
+    }
+  }
+
+  void retry() {
+    setState(() {
+      loading = true;
+      error = null;
+    });
+    load();
   }
 
   Future<void> setStatus(Order o, String status) async {
+    if (busyId != null) return;
+    // Bekor qilishdan oldin tasdiqlash (server kuryer biriktiruvini ham olib tashlaydi)
+    if (status == 'cancelled' &&
+        !await confirmDialog(context, tr('Buyurtmani bekor qilasizmi?'), text: tr("Kuryer biriktirilgan bo'lsa, u ham bekor qilinadi."), ok: tr('Ha, bekor qilish'), danger: true)) {
+      return;
+    }
+    if (!mounted) return;
+    setState(() => busyId = o.id);
     try {
       await Api.instance.patch('/api/seller/orders/${o.id}', {'status': status});
       await load();
       AppState.instance.refreshBadges();
     } catch (e) {
-      if (mounted) showToast(context, e.toString(), error: true);
+      if (mounted) showToast(context, sellerErrorText(e), error: true);
+      // 409: buyurtma holati allaqachon o'zgargan — ro'yxatni yangilaymiz
+      if (e is ApiException && e.status == 409) await load();
     }
+    if (mounted) setState(() => busyId = null);
+  }
+
+  Future<void> _open(Uri uri, {LaunchMode mode = LaunchMode.platformDefault}) async {
+    try {
+      final ok = await launchUrl(uri, mode: mode);
+      if (!ok && mounted) showToast(context, tr("Ochib bo'lmadi"), error: true);
+    } catch (_) {
+      if (mounted) showToast(context, tr("Ochib bo'lmadi"), error: true);
+    }
+  }
+
+  /// Yetkazish holati chipi: (matn, rang, ikonka) yoki null
+  (String, Color, IconData)? _delivery(Order o) {
+    final p = context.p;
+    return switch (o.deliveryStatus) {
+      'assigned' => (tr('Kuryer biriktirildi'), const Color(0xFF7C5CFF), Icons.assignment_ind_outlined),
+      'picked' => (tr("Kuryer yo'lda"), const Color(0xFF3B6BFF), Icons.two_wheeler_rounded),
+      'delivered' => (tr('Yetkazildi'), p.success, Icons.check_circle_outline_rounded),
+      null when o.status == 'new' => (tr('Kuryer qidirilmoqda'), p.accentText, Icons.search_rounded),
+      _ => null,
+    };
+  }
+
+  Widget _chip(String text, Color c, IconData ic) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+        decoration: BoxDecoration(color: c.withValues(alpha: .13), borderRadius: BorderRadius.circular(99)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(ic, size: 13, color: c),
+          const SizedBox(width: 4),
+          Text(text, style: TextStyle(color: c, fontWeight: FontWeight.w800, fontSize: 11)),
+        ]),
+      );
+
+  Widget _pill(IconData ic, String text, VoidCallback onTap) {
+    final p = context.p;
+    return Material(
+      color: p.bg,
+      borderRadius: BorderRadius.circular(99),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(99),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(ic, size: 14, color: p.accentText),
+            const SizedBox(width: 4),
+            Text(text, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: p.accentText)),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _orderCard(Order o) {
+    final p = context.p;
+    final dl = _delivery(o);
+    final busy = busyId == o.id;
+    final extra = [
+      if (o.deliveryFee != null && o.deliveryFee! > 0) "${tr('Yetkazish')}: ${fmtPrice(o.deliveryFee!)} so'm",
+      if (o.routeKm != null && o.routeKm! > 0) '${o.routeKm!.toStringAsFixed(1)} km',
+    ].join(' · ');
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: p.card, borderRadius: BorderRadius.circular(18), boxShadow: softShadow(context), border: context.isDark ? Border.all(color: p.border) : null),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [StatusBadge(o.status, tr(o.statusLabel)), const Spacer(), Text(fmtTime(o.createdAt), style: TextStyle(fontSize: 12, color: p.muted, fontWeight: FontWeight.w600))]),
+        const SizedBox(height: 10),
+        if (o.items.length > 1 || (o.items.isNotEmpty && o.items.first.qty > 1)) ...[
+          for (final i in o.items) Text('${i.name} × ${i.qty}', style: const TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          PriceText(o.price, size: 15),
+        ] else
+          Row(children: [Expanded(child: Text(o.productName, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15))), PriceText(o.price, size: 14)]),
+        const SizedBox(height: 8),
+        Row(children: [
+          Icon(Icons.person_outline_rounded, size: 16, color: p.muted),
+          const SizedBox(width: 6),
+          Expanded(child: Text(o.customerName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600))),
+        ]),
+        if (o.phone.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          InkWell(
+              onTap: () => _open(Uri.parse('tel:${o.phone}')),
+              child: Row(children: [
+                Icon(Icons.phone_outlined, size: 16, color: p.success),
+                const SizedBox(width: 6),
+                Text(o.phone, style: TextStyle(color: p.accentText, fontWeight: FontWeight.w700))
+              ])),
+        ],
+        // Xaridor manzili va xaritada ochish
+        if (o.address.isNotEmpty || o.hasLocation) ...[
+          const SizedBox(height: 6),
+          Row(children: [
+            Icon(Icons.location_on_outlined, size: 16, color: p.muted),
+            const SizedBox(width: 6),
+            Expanded(
+                child: Text(o.address.isNotEmpty ? o.address : tr('Joylashuv yuborilgan'),
+                    maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: p.text.withValues(alpha: .85), height: 1.3))),
+            if (o.hasLocation) ...[
+              const SizedBox(width: 8),
+              _pill(Icons.map_outlined, tr('Xarita'),
+                  () => _open(Uri.parse('https://www.google.com/maps/search/?api=1&query=${o.lat},${o.lon}'), mode: LaunchMode.externalApplication)),
+            ],
+          ]),
+        ],
+        // Yetkazish: holat, kuryer, narx va masofa
+        if (dl != null || o.courierName.isNotEmpty || extra.isNotEmpty)
+          Container(
+            margin: const EdgeInsets.only(top: 10),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: p.bg, borderRadius: BorderRadius.circular(14)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              if (dl != null || extra.isNotEmpty)
+                Row(children: [
+                  if (dl != null) _chip(dl.$1, dl.$2, dl.$3),
+                  if (dl != null && extra.isNotEmpty) const SizedBox(width: 8),
+                  if (extra.isNotEmpty)
+                    Expanded(
+                        child: Text(extra,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: dl != null ? TextAlign.end : TextAlign.start,
+                            style: TextStyle(fontSize: 12, color: p.muted, fontWeight: FontWeight.w600))),
+                ]),
+              if (o.courierName.isNotEmpty) ...[
+                if (dl != null || extra.isNotEmpty) const SizedBox(height: 8),
+                Row(children: [
+                  Icon(Icons.two_wheeler_rounded, size: 16, color: p.muted),
+                  const SizedBox(width: 6),
+                  Expanded(child: Text(o.courierName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
+                  if (o.courierPhone.isNotEmpty) IconBtn(Icons.phone_outlined, size: 34, bg: p.successSoft, color: p.success, onTap: () => _open(Uri.parse('tel:${o.courierPhone}'))),
+                ]),
+              ],
+            ]),
+          ),
+        if (o.status == 'new')
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Row(children: [
+              Expanded(
+                  child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(40),
+                          backgroundColor: p.successSoft,
+                          foregroundColor: p.success,
+                          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
+                      icon: const Icon(Icons.check_rounded, size: 16),
+                      label: Text(tr('Bajarildi')),
+                      onPressed: busy ? null : () => setStatus(o, 'done'))),
+              const SizedBox(width: 8),
+              Expanded(
+                  child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(40),
+                          backgroundColor: p.danger.withValues(alpha: .12),
+                          foregroundColor: p.danger,
+                          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
+                      icon: const Icon(Icons.close_rounded, size: 16),
+                      label: Text(tr('Bekor')),
+                      onPressed: busy ? null : () => setStatus(o, 'cancelled'))),
+            ]),
+          ),
+      ]),
+    );
   }
 
   @override
@@ -147,82 +395,41 @@ class _OrdersTabState extends State<OrdersTab> {
     return Scaffold(
       body: RefreshIndicator(
         onRefresh: load,
-        child: ListView(padding: EdgeInsets.zero, children: [
-          SellerHeader('Buyurtmalar', onExit: widget.onExit),
+        child: ListView(padding: EdgeInsets.zero, physics: const AlwaysScrollableScrollPhysics(), children: [
+          SellerHeader(tr('Buyurtmalar'), onExit: widget.onExit),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, navPad),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               ChoiceChips(
-                  items: [('new', 'Yangi · ${count('new')}'), ('all', 'Hammasi · ${count('all')}'), ('done', 'Bajarilgan · ${count('done')}'), ('cancelled', 'Bekor · ${count('cancelled')}')],
+                  items: [
+                    ('new', '${tr('Yangi')} · ${count('new')}'),
+                    ('all', '${tr('Hammasi')} · ${count('all')}'),
+                    ('done', '${tr('Bajarilgan')} · ${count('done')}'),
+                    ('cancelled', '${tr('Bekor')} · ${count('cancelled')}'),
+                  ],
                   value: filter,
                   onChanged: (v) => setState(() => filter = v)),
               const SizedBox(height: 12),
               if (loading)
                 const Center(child: Padding(padding: EdgeInsets.all(30), child: CircularProgressIndicator(strokeWidth: 2.5)))
-              else if (list.isEmpty)
-                const EmptyBox(Icons.receipt_long_outlined, "Buyurtma yo'q")
-              else
-                for (final o in list)
+              else if (error != null && orders.isEmpty)
+                EmptyBox(Icons.cloud_off_rounded, error!, action: FilledButton.icon(onPressed: retry, icon: const Icon(Icons.refresh_rounded, size: 18), label: Text(tr('Qayta urinish'))))
+              else ...[
+                // Eski ro'yxat bor, lekin yangilab bo'lmadi — ixcham ogohlantirish
+                if (error != null)
                   Container(
                     margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(color: p.card, borderRadius: BorderRadius.circular(18), boxShadow: softShadow(context), border: context.isDark ? Border.all(color: p.border) : null),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Row(children: [StatusBadge(o.status, o.statusLabel), const Spacer(), Text(fmtTime(o.createdAt), style: TextStyle(fontSize: 12, color: p.muted, fontWeight: FontWeight.w600))]),
-                      const SizedBox(height: 10),
-                      if (o.items.length > 1 || (o.items.isNotEmpty && o.items.first.qty > 1)) ...[
-                        for (final i in o.items) Text('${i.name} × ${i.qty}', style: const TextStyle(fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 4),
-                        PriceText(o.price, size: 15),
-                      ] else
-                        Row(children: [Expanded(child: Text(o.productName, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15))), PriceText(o.price, size: 14)]),
-                      const SizedBox(height: 8),
-                      Row(children: [
-                        Icon(Icons.person_outline_rounded, size: 16, color: p.muted),
-                        const SizedBox(width: 6),
-                        Text(o.customerName, style: const TextStyle(fontWeight: FontWeight.w600)),
-                        const SizedBox(width: 12),
-                        Icon(Icons.send_outlined, size: 14, color: p.muted),
-                        const SizedBox(width: 6),
-                        Expanded(child: Text(o.buyerLink, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.muted, fontSize: 13))),
-                      ]),
-                      const SizedBox(height: 4),
-                      InkWell(
-                          onTap: () => launchUrl(Uri.parse('tel:${o.phone}')),
-                          child: Row(children: [
-                            Icon(Icons.phone_outlined, size: 16, color: p.success),
-                            const SizedBox(width: 6),
-                            Text(o.phone, style: TextStyle(color: p.accentText, fontWeight: FontWeight.w700))
-                          ])),
-                      if (o.status == 'new')
-                        Padding(
-                          padding: const EdgeInsets.only(top: 10),
-                          child: Row(children: [
-                            Expanded(
-                                child: FilledButton.icon(
-                                    style: FilledButton.styleFrom(
-                                        minimumSize: const Size.fromHeight(40),
-                                        backgroundColor: p.successSoft,
-                                        foregroundColor: p.success,
-                                        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
-                                    icon: const Icon(Icons.check_rounded, size: 16),
-                                    label: const Text('Bajarildi'),
-                                    onPressed: () => setStatus(o, 'done'))),
-                            const SizedBox(width: 8),
-                            Expanded(
-                                child: FilledButton.icon(
-                                    style: FilledButton.styleFrom(
-                                        minimumSize: const Size.fromHeight(40),
-                                        backgroundColor: p.danger.withValues(alpha: .12),
-                                        foregroundColor: p.danger,
-                                        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
-                                    icon: const Icon(Icons.close_rounded, size: 16),
-                                    label: const Text('Bekor'),
-                                    onPressed: () => setStatus(o, 'cancelled'))),
-                          ]),
-                        ),
+                    padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+                    decoration: BoxDecoration(color: p.danger.withValues(alpha: .1), borderRadius: BorderRadius.circular(14)),
+                    child: Row(children: [
+                      Icon(Icons.cloud_off_rounded, size: 16, color: p.danger),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(error!, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: p.danger, fontWeight: FontWeight.w600))),
+                      TextButton(onPressed: load, child: Text(tr('Qayta urinish'), style: const TextStyle(fontSize: 12))),
                     ]),
                   ),
+                if (list.isEmpty) EmptyBox(Icons.receipt_long_outlined, tr("Buyurtma yo'q")) else for (final o in list) _orderCard(o),
+              ],
             ]),
           ),
         ]),
@@ -240,67 +447,105 @@ class AdviceTab extends StatefulWidget {
 }
 
 class _AdviceTabState extends State<AdviceTab> {
-  late Future<dynamic> future = Api.instance.get('/api/seller/advice');
+  static const _path = '/api/seller/advice';
+  dynamic data = Api.instance.cached(_path);
+  String? error;
+  bool refreshing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetch(false);
+  }
+
+  /// refresh=true — AI qayta tahlil qiladi (?refresh=1), tugmada indikator aylanadi
+  Future<void> _fetch(bool refresh) async {
+    try {
+      final r = await Api.instance.get(refresh ? '$_path?refresh=1' : _path);
+      if (!mounted) return;
+      setState(() {
+        data = r;
+        error = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => error = sellerErrorText(e));
+      // Eski tavsiyalar ekranda qoladi — faqat xabar
+      if (refresh && data != null) showToast(context, error!, error: true);
+    }
+    if (mounted && refreshing) setState(() => refreshing = false);
+  }
+
+  void reanalyze() {
+    if (refreshing) return;
+    setState(() => refreshing = true);
+    _fetch(true);
+  }
+
+  void retry() {
+    setState(() => error = null);
+    _fetch(false);
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = context.p;
+    final raw = data;
+    final tipsRaw = raw is Map ? raw['tips'] : null;
+    final tips = (tipsRaw is List ? tipsRaw : const []).map((e) => Tip.fromJson(e)).toList();
     return Scaffold(
       body: ListView(padding: EdgeInsets.zero, children: [
-        SellerHeader('AI tavsiyalar', onExit: widget.onExit),
+        SellerHeader(tr('AI tavsiyalar'), onExit: widget.onExit),
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, navPad),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             DarkBanner(
               glow: const Color(0xFF7C5CFF),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Row(children: [
-                  Icon(Icons.auto_awesome, size: 14, color: Color(0xFFC9D3FF)),
-                  SizedBox(width: 6),
-                  Text('AI MASLAHATCHI', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: .6, color: Color(0xFFC9D3FF)))
+                Row(children: [
+                  const Icon(Icons.auto_awesome, size: 14, color: Color(0xFFC9D3FF)),
+                  const SizedBox(width: 6),
+                  Text(tr('AI MASLAHATCHI'), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: .6, color: Color(0xFFC9D3FF)))
                 ]),
                 const SizedBox(height: 8),
-                Text("Do'koningiz ma'lumotlarini tahlil qilib, sotuvni oshirish bo'yicha tavsiyalar beradi",
+                Text(tr("Do'koningiz ma'lumotlarini tahlil qilib, sotuvni oshirish bo'yicha tavsiyalar beradi"),
                     style: TextStyle(color: Colors.white.withValues(alpha: .9), fontSize: 14, height: 1.4, fontWeight: FontWeight.w600)),
               ]),
             ),
             const SizedBox(height: 12),
-            FutureBuilder(
-              future: future,
-              initialData: Api.instance.cached('/api/seller/advice'),
-              builder: (_, snap) {
-                if (!snap.hasData) return const Padding(padding: EdgeInsets.all(30), child: Center(child: CircularProgressIndicator(strokeWidth: 2.5)));
-                final tips = (snap.data['tips'] as List).map((e) => Tip.fromJson(e)).toList();
-                return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  for (final t in tips)
+            if (raw == null && error != null)
+              EmptyBox(Icons.cloud_off_rounded, error!, action: FilledButton.icon(onPressed: retry, icon: const Icon(Icons.refresh_rounded, size: 18), label: Text(tr('Qayta urinish'))))
+            else if (raw == null)
+              const Padding(padding: EdgeInsets.all(30), child: Center(child: CircularProgressIndicator(strokeWidth: 2.5)))
+            else ...[
+              for (final t in tips)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(color: p.card, borderRadius: BorderRadius.circular(18), boxShadow: softShadow(context), border: context.isDark ? Border.all(color: p.border) : null),
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(color: p.card, borderRadius: BorderRadius.circular(18), boxShadow: softShadow(context), border: context.isDark ? Border.all(color: p.border) : null),
-                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Container(
-                          width: 38,
-                          height: 38,
-                          decoration: BoxDecoration(
-                              color: switch (t.type) { 'warning' => const Color(0xFFFFF1E0), 'success' => p.successSoft, _ => const Color(0xFFEFEAFF) }, borderRadius: BorderRadius.circular(12)),
-                          child: Icon(switch (t.type) { 'warning' => Icons.warning_amber_rounded, 'success' => Icons.check_circle_outline_rounded, _ => Icons.lightbulb_outline_rounded },
-                              size: 20, color: switch (t.type) { 'warning' => const Color(0xFFA86F00), 'success' => p.success, _ => const Color(0xFF7C5CFF) }),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text(t.title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
-                          const SizedBox(height: 3),
-                          Text(t.text, style: TextStyle(fontSize: 13, color: p.text.withValues(alpha: .8), height: 1.45))
-                        ])),
-                      ]),
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                          color: switch (t.type) { 'warning' => const Color(0xFFFFF1E0), 'success' => p.successSoft, _ => const Color(0xFFEFEAFF) }, borderRadius: BorderRadius.circular(12)),
+                      child: Icon(switch (t.type) { 'warning' => Icons.warning_amber_rounded, 'success' => Icons.check_circle_outline_rounded, _ => Icons.lightbulb_outline_rounded },
+                          size: 20, color: switch (t.type) { 'warning' => const Color(0xFFA86F00), 'success' => p.success, _ => const Color(0xFF7C5CFF) }),
                     ),
-                  OutlinedButton.icon(
-                      icon: const Icon(Icons.refresh_rounded, size: 18),
-                      label: const Text('Qayta tahlil qilish'),
-                      onPressed: () => setState(() => future = Api.instance.get('/api/seller/advice?refresh=1'))),
-                ]);
-              },
-            ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(t.title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+                      const SizedBox(height: 3),
+                      Text(t.text, style: TextStyle(fontSize: 13, color: p.text.withValues(alpha: .8), height: 1.45))
+                    ])),
+                  ]),
+                ),
+              OutlinedButton.icon(
+                  icon: refreshing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.refresh_rounded, size: 18),
+                  label: Text(refreshing ? tr('Tahlil qilinmoqda...') : tr('Qayta tahlil qilish')),
+                  onPressed: refreshing ? null : reanalyze),
+            ],
           ]),
         ),
       ]),
@@ -351,20 +596,20 @@ class _ProductsTabState extends State<ProductsTab> {
             backgroundColor: p.dark,
             foregroundColor: p.onDark,
             icon: const Icon(Icons.add_rounded),
-            label: const Text("Mahsulot qo'shish", style: TextStyle(fontWeight: FontWeight.w700)),
+            label: Text(tr("Mahsulot qo'shish"), style: const TextStyle(fontWeight: FontWeight.w700)),
             onPressed: () => openProductForm(context, null, load)),
       ),
       body: ListView(padding: EdgeInsets.zero, children: [
-        SellerHeader('Mahsulotlar', onExit: widget.onExit),
+        SellerHeader(tr('Mahsulotlar'), onExit: widget.onExit),
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, navPad),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            SearchField(hint: 'Qidirish...', onChanged: (v) => setState(() => q = v)),
+            SearchField(hint: tr('Qidirish...'), onChanged: (v) => setState(() => q = v)),
             const SizedBox(height: 12),
             if (loading)
               const Center(child: Padding(padding: EdgeInsets.all(30), child: CircularProgressIndicator(strokeWidth: 2.5)))
             else if (list.isEmpty)
-              const EmptyBox(Icons.inventory_2_outlined, "Hozircha mahsulot yo'q")
+              EmptyBox(Icons.inventory_2_outlined, tr("Hozircha mahsulot yo'q"))
             else
               for (final x in list)
                 Opacity(
@@ -381,20 +626,31 @@ class _ProductsTabState extends State<ProductsTab> {
                         Text(x.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800)),
                         Row(children: [
                           PriceText(x.price, size: 13),
-                          Text('  ·  ${x.views} ko\'rish${x.active ? '' : '  ·  yashirin'}', style: TextStyle(fontSize: 12, color: p.muted, fontWeight: FontWeight.w600))
+                          // Tor ekranda ko'rishlar matni qisqaradi, qator toshib ketmaydi
+                          Flexible(
+                              child: Text("  ·  ${x.views} ${tr("ko'rish")}${x.active ? '' : '  ·  ${tr('yashirin')}'}",
+                                  maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: p.muted, fontWeight: FontWeight.w600))),
                         ]),
                       ])),
                       IconBtn(x.active ? Icons.visibility_outlined : Icons.visibility_off_outlined, size: 36, bg: p.bg, onTap: () async {
-                        await Api.instance.put('/api/seller/products/${x.id}', {'active': !x.active});
-                        load();
+                        try {
+                          await Api.instance.put('/api/seller/products/${x.id}', {'active': !x.active});
+                          await load();
+                        } catch (e) {
+                          if (context.mounted) showToast(context, sellerErrorText(e), error: true);
+                        }
                       }),
                       const SizedBox(width: 6),
                       IconBtn(Icons.edit_outlined, size: 36, bg: p.bg, onTap: () => openProductForm(context, x, load)),
                       const SizedBox(width: 6),
                       IconBtn(Icons.delete_outline_rounded, size: 36, bg: p.danger.withValues(alpha: .1), color: p.danger, onTap: () async {
                         if (!await confirmDialog(context, '"${x.name}" o\'chirilsinmi?', text: "Bu amalni qaytarib bo'lmaydi.", ok: "O'chirish", danger: true)) return;
-                        await Api.instance.delete('/api/seller/products/${x.id}');
-                        load();
+                        try {
+                          await Api.instance.delete('/api/seller/products/${x.id}');
+                          await load();
+                        } catch (e) {
+                          if (context.mounted) showToast(context, sellerErrorText(e), error: true);
+                        }
                       }),
                     ]),
                   ),
@@ -406,7 +662,7 @@ class _ProductsTabState extends State<ProductsTab> {
   }
 }
 
-/// Mahsulot qo'shish / tahrirlash (rasm majburiy, AI tekshiradi)
+/// Mahsulot qo'shish / tahrirlash (rasm, narx va kategoriya majburiy)
 void openProductForm(BuildContext context, Product? p, VoidCallback onSaved) {
   final name = TextEditingController(text: p?.name ?? '');
   final price = TextEditingController(text: p == null ? '' : '${p.price}');
@@ -426,7 +682,7 @@ void openProductForm(BuildContext context, Product? p, VoidCallback onSaved) {
         return Padding(
           padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.of(c).viewInsets.bottom + 24),
           child: ListView(shrinkWrap: true, children: [
-            Text(p == null ? 'Yangi mahsulot' : 'Tahrirlash', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -.4)),
+            Text(p == null ? tr('Yangi mahsulot') : tr('Tahrirlash'), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -.4)),
             if (rejection != null)
               Container(
                 margin: const EdgeInsets.only(top: 12),
@@ -435,15 +691,16 @@ void openProductForm(BuildContext context, Product? p, VoidCallback onSaved) {
                 child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Icon(Icons.error_outline_rounded, color: pal.danger),
                   const SizedBox(width: 10),
-                  Expanded(child: Text('AI tekshiruvi rad etdi: $rejection', style: const TextStyle(fontWeight: FontWeight.w600)))
+                  // Server rad etgan sabab (matn serverdan keladi)
+                  Expanded(child: Text(rejection ?? '', style: const TextStyle(fontWeight: FontWeight.w600)))
                 ]),
               ),
             const SizedBox(height: 12),
-            TextField(controller: name, decoration: const InputDecoration(labelText: 'Nomi')),
+            TextField(controller: name, decoration: InputDecoration(labelText: tr('Nomi'))),
             const SizedBox(height: 10),
-            TextField(controller: price, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Narxi (so'm)")),
+            TextField(controller: price, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: tr("Narxi (so'm)"))),
             const SizedBox(height: 10),
-            TextField(controller: desc, maxLines: 3, decoration: const InputDecoration(labelText: 'Tavsif')),
+            TextField(controller: desc, maxLines: 3, decoration: InputDecoration(labelText: tr('Tavsif'))),
             const SizedBox(height: 14),
             Row(children: [
               Text('${tr('Kategoriya')} *', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: pal.muted)),
@@ -494,11 +751,23 @@ void openProductForm(BuildContext context, Product? p, VoidCallback onSaved) {
               if (photos.length < 10)
                 InkWell(
                   onTap: () async {
-                    final files = await ImagePicker().pickMultiImage(maxWidth: 1280, imageQuality: 85);
-                    for (final f in files.take(10 - photos.length)) {
-                      photos.add('data:image/jpeg;base64,${base64Encode(await f.readAsBytes())}');
+                    final src = await askImageSource(c);
+                    if (src == null) return;
+                    try {
+                      final List<XFile> files;
+                      if (src == ImageSource.camera) {
+                        final f = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 1280, imageQuality: 85);
+                        files = f == null ? [] : [f];
+                      } else {
+                        files = await ImagePicker().pickMultiImage(maxWidth: 1280, imageQuality: 85);
+                      }
+                      for (final f in files.take(10 - photos.length)) {
+                        photos.add('data:image/jpeg;base64,${base64Encode(await f.readAsBytes())}');
+                      }
+                      setSt(() {});
+                    } catch (_) {
+                      if (c.mounted) showToast(c, tr("Rasm olib bo'lmadi"), error: true);
                     }
-                    setSt(() {});
                   },
                   borderRadius: BorderRadius.circular(12),
                   child: Container(
@@ -510,35 +779,38 @@ void openProductForm(BuildContext context, Product? p, VoidCallback onSaved) {
             ]),
             const SizedBox(height: 18),
             FilledButton.icon(
-              icon: busy ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.check_rounded, size: 18),
-              label: Text(busy ? 'AI tekshirmoqda...' : (p == null ? "Qo'shish" : 'Saqlash')),
+              icon: busy ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: pal.onAccent)) : const Icon(Icons.check_rounded, size: 18),
+              label: Text(busy ? tr('Saqlanmoqda...') : (p == null ? tr("Qo'shish") : tr('Saqlash'))),
               onPressed: busy
                   ? null
                   : () async {
-                      if (photos.isEmpty) return showToast(c, 'Kamida 1 ta rasm yuklang', error: true);
+                      // Mijoz tomonida tekshiruv: narx > 0, kategoriya va kamida 1 ta rasm
+                      final priceVal = int.tryParse(price.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+                      if (priceVal <= 0) return showToast(c, tr('Narxni kiriting'), error: true);
+                      if (category == null) return showToast(c, tr('Kategoriyani tanlang'), error: true);
+                      if (photos.isEmpty) return showToast(c, tr('Kamida 1 ta rasm yuklang'), error: true);
                       setSt(() {
                         busy = true;
                         rejection = null;
                       });
-                      if (category == null) {
-                        setSt(() => busy = false);
-                        showToast(c, tr('Kategoriyani tanlang'), error: true);
-                        return;
-                      }
                       try {
-                        final body = {'name': name.text, 'price': price.text, 'description': desc.text, 'photos': photos, 'category': category};
+                        final body = {'name': name.text.trim(), 'price': priceVal, 'description': desc.text, 'photos': photos, 'category': category};
                         p == null ? await Api.instance.post('/api/seller/products', body) : await Api.instance.put('/api/seller/products/${p.id}', body);
                         if (c.mounted) Navigator.pop(c);
                         onSaved();
                       } on ApiException catch (e) {
-                        setSt(() {
-                          busy = false;
-                          if (e.rejected) rejection = e.message;
-                        });
+                        if (c.mounted) {
+                          setSt(() {
+                            busy = false;
+                            if (e.rejected) rejection = e.message;
+                          });
+                        }
                         if (!e.rejected && c.mounted) showToast(c, e.message, error: true);
                       } catch (e) {
-                        setSt(() => busy = false);
-                        if (c.mounted) showToast(c, e.toString(), error: true);
+                        if (c.mounted) {
+                          setSt(() => busy = false);
+                          showToast(c, sellerErrorText(e), error: true);
+                        }
                       }
                     },
             ),
@@ -633,7 +905,10 @@ class ProfileTab extends StatelessWidget {
 
   Widget item(BuildContext c, IconData ic, String title, {String? sub, VoidCallback? onTap, bool danger = false}) {
     final p = c.p;
-    return ListTile(
+    // Oq kartochka ichida bosilish effekti ko'rinishi uchun ListTile o'z Material qatlamida turadi
+    return Material(
+      type: MaterialType.transparency,
+      child: ListTile(
       onTap: onTap,
       leading: Container(
           width: 38,
@@ -643,6 +918,7 @@ class ProfileTab extends StatelessWidget {
       title: Text(title, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: danger ? p.danger : null)),
       subtitle: sub == null ? null : Text(sub, style: TextStyle(fontSize: 12, color: p.muted)),
       trailing: danger ? null : Icon(Icons.chevron_right_rounded, color: p.muted),
+      ),
     );
   }
 
@@ -675,14 +951,16 @@ class ProfileTab extends StatelessWidget {
                     icon: const Icon(Icons.image_outlined, size: 16),
                     label: Text(s.logo == null ? tr('Logo yuklash') : tr("Logoni o'zgartirish")),
                     onPressed: () async {
-                      final f = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 512, imageQuality: 85);
+                      final src = await askImageSource(context);
+                      if (src == null) return;
+                      final f = await ImagePicker().pickImage(source: src, maxWidth: 512, imageQuality: 85);
                       if (f == null) return;
                       try {
                         final r = await Api.instance.put('/api/seller/shop', {'logo': 'data:image/jpeg;base64,${base64Encode(await f.readAsBytes())}'});
                         st.sellerShop = Shop.fromJson(r['shop']);
                         st.refresh();
                       } catch (e) {
-                        if (context.mounted) showToast(context, e.toString(), error: true);
+                        if (context.mounted) showToast(context, sellerErrorText(e), error: true);
                       }
                     }),
               ]),
@@ -702,11 +980,18 @@ class ProfileTab extends StatelessWidget {
                     onTap: () => st.setTheme(ThemeMode.values[(st.themeMode.index + 1) % 3])),
                 item(context, Icons.key_outlined, "Parolni o'zgartirish", onTap: () => _password(context)),
                 item(context, Icons.storefront_outlined, "Do'konni xaridor ko'zi bilan ko'rish", onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ShopScreen(s.id)))),
-                item(context, Icons.picture_as_pdf_outlined, 'PDF hisobot', sub: "Barcha ko'rsatkichlar bitta faylda, Telegram botga yuboriladi", onTap: () => downloadReport(context)),
+                item(context, Icons.picture_as_pdf_outlined, tr('Hisobot (PDF)'),
+                    sub: tr("Barcha ko'rsatkichlar bitta sahifada. Brauzerda ochiladi, PDF qilib saqlash mumkin."), onTap: () => downloadReport(context)),
                 item(context, Icons.restart_alt_rounded, 'Hisobni yopib, yangisini boshlash', sub: "Buyurtmalar va ko'rishlar nolga tushadi, mahsulotlar qoladi", onTap: () => _reset(context)),
                 item(context, Icons.logout_rounded, tr('Chiqish'), danger: true, onTap: () async {
-                  if (!await confirmDialog(context, "Do'kondan chiqasizmi?", ok: 'Chiqish')) return;
-                  await Api.instance.post('/api/seller/logout');
+                  if (!await confirmDialog(context, tr("Do'kondan chiqasizmi?"), ok: tr('Chiqish'))) return;
+                  try {
+                    await Api.instance.post('/api/seller/logout');
+                  } catch (e) {
+                    // Server chiqishni tasdiqlamasa, sessiya saqlanib qoladi — ekranda qolamiz
+                    if (context.mounted) showToast(context, sellerErrorText(e), error: true);
+                    return;
+                  }
                   st.sellerShop = null;
                   st.refresh();
                   onExit();
@@ -751,7 +1036,7 @@ class ProfileTab extends StatelessWidget {
                   AppState.instance.refresh();
                   if (c.mounted) Navigator.pop(c);
                 } catch (e) {
-                  if (c.mounted) showToast(c, e.toString(), error: true);
+                  if (c.mounted) showToast(c, sellerErrorText(e), error: true);
                 }
               },
               child: const Text('Saqlash')),
@@ -799,12 +1084,12 @@ class ProfileTab extends StatelessWidget {
                 try {
                   var perm = await Geolocator.checkPermission();
                   if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
-                  if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) throw Exception('Joylashuvga ruxsat berilmadi');
+                  if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) throw Exception(tr('Joylashuvga ruxsat berilmadi'));
                   final p = await Geolocator.getCurrentPosition();
                   setSt(() => pos = LatLng(p.latitude, p.longitude));
                   ctrl.move(pos!, 16);
                 } catch (e) {
-                  if (c.mounted) showToast(c, e.toString(), error: true);
+                  if (c.mounted) showToast(c, sellerErrorText(e), error: true);
                 }
               },
             ),
@@ -826,7 +1111,7 @@ class ProfileTab extends StatelessWidget {
                   AppState.instance.refresh();
                   if (c.mounted) Navigator.pop(c);
                 } catch (e) {
-                  if (c.mounted) showToast(c, e.toString(), error: true);
+                  if (c.mounted) showToast(c, sellerErrorText(e), error: true);
                 }
               },
             ),
@@ -835,11 +1120,15 @@ class ProfileTab extends StatelessWidget {
                 icon: Icon(Icons.delete_outline_rounded, color: c.p.danger, size: 18),
                 label: Text("Joylashuvni o'chirish", style: TextStyle(color: c.p.danger)),
                 onPressed: () async {
-                  if (!await confirmDialog(c, "Joylashuv o'chirilsinmi?", ok: "O'chirish", danger: true)) return;
-                  final r = await Api.instance.put('/api/seller/shop', {'location': null});
-                  AppState.instance.sellerShop = Shop.fromJson(r['shop']);
-                  AppState.instance.refresh();
-                  if (c.mounted) Navigator.pop(c);
+                  if (!await confirmDialog(c, tr("Joylashuv o'chirilsinmi?"), ok: tr("O'chirish"), danger: true)) return;
+                  try {
+                    final r = await Api.instance.put('/api/seller/shop', {'location': null});
+                    AppState.instance.sellerShop = Shop.fromJson(r['shop']);
+                    AppState.instance.refresh();
+                    if (c.mounted) Navigator.pop(c);
+                  } catch (e) {
+                    if (c.mounted) showToast(c, sellerErrorText(e), error: true);
+                  }
                 },
               ),
           ]),
@@ -893,14 +1182,14 @@ class ProfileTab extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Text('PDF hisobotni yuklab oldingizmi?', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                  Text(tr('Hisobotni saqlab oldingizmi?'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
                   Text("Eski hisob ma'lumotlari faqat hisobotda qoladi", style: TextStyle(fontSize: 11, color: p.muted))
                 ])),
                 const SizedBox(width: 8),
                 OutlinedButton(
                     style: OutlinedButton.styleFrom(minimumSize: const Size(0, 36), padding: const EdgeInsets.symmetric(horizontal: 10), backgroundColor: p.bg, side: BorderSide.none),
                     onPressed: () => downloadReport(c),
-                    child: const Text('Yuklab olish', style: TextStyle(fontSize: 12))),
+                    child: Text(tr('Ochish'), style: const TextStyle(fontSize: 12))),
               ]),
             ),
             const SizedBox(height: 12),
@@ -913,14 +1202,16 @@ class ProfileTab extends StatelessWidget {
               onPressed: () async {
                 if (pwd.text.isEmpty) return showToast(c, 'Parolni kiriting', error: true);
                 if (!await confirmDialog(c, 'Aniq yangi hisob boshlaysizmi?',
-                    text: "PDF hisobotni yuklab olganingizga ishonch hosil qiling — eski buyurtmalar qaytmaydi.", ok: 'Ha, boshlash', danger: true)) return;
+                    text: tr("Hisobotni saqlab olganingizga ishonch hosil qiling — eski buyurtmalar qaytmaydi."), ok: tr('Ha, boshlash'), danger: true)) {
+                      return;
+                    }
                 try {
                   final r = await Api.instance.post('/api/seller/reset', {'password': pwd.text});
                   AppState.instance.refreshBadges();
                   if (c.mounted) Navigator.pop(c);
                   if (context.mounted) showToast(context, 'Yangi hisob boshlandi: ${r['orders']} ta buyurtma arxivlandi');
                 } catch (e) {
-                  if (c.mounted) showToast(c, e.toString(), error: true);
+                  if (c.mounted) showToast(c, sellerErrorText(e), error: true);
                 }
               },
             ),
@@ -956,7 +1247,7 @@ class ProfileTab extends StatelessWidget {
                   if (c.mounted) Navigator.pop(c);
                   if (context.mounted) showToast(context, "Parol o'zgartirildi");
                 } catch (e) {
-                  if (c.mounted) showToast(c, e.toString(), error: true);
+                  if (c.mounted) showToast(c, sellerErrorText(e), error: true);
                 }
               },
               child: const Text("O'zgartirish")),

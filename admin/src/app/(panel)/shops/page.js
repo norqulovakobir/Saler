@@ -1,8 +1,8 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { MapPin, Search } from 'lucide-react';
-import { Avatar, Badge, Card, ErrorBox, PageTitle, Pagination, Table, Toolbar } from '@/components/ui';
+import { Avatar, Badge, Card, ErrorBox, PageTitle, Pagination, Segmented, Table, Toolbar } from '@/components/ui';
 import { useApi, useDebounced } from '@/lib/hooks';
 import { photoUrl } from '@/lib/api';
 import { ago, date, moneyShort, num } from '@/lib/format';
@@ -11,9 +11,12 @@ export default function Shops() {
   const router = useRouter();
   const [q, setQ] = useState('');
   const [sort, setSort] = useState('createdAt');
+  const [active, setActive] = useState('');
   const [page, setPage] = useState(1);
   const dq = useDebounced(q);
-  const { data, loading, error, reload } = useApi('/shops', { query: { q: dq, sort, page, limit: 25 } });
+  const { data, loading, error, reload } = useApi('/shops', { query: { q: dq, sort, active, page, limit: 25 } });
+  // Bosh sahifadagi qidiruvdan "Hammasi" bosilganda so'rov shu yerda davom etadi
+  useEffect(() => { const fromUrl = new URLSearchParams(window.location.search).get('q'); if (fromUrl) setQ(fromUrl); }, []);
 
   return (
     <>
@@ -21,22 +24,28 @@ export default function Shops() {
       <ErrorBox error={error} retry={reload} />
       <Card pad={false}>
         <Toolbar>
-          <div className="relative"><Search size={14} className="absolute left-3 top-[11px] text-muted" /><input className="input w-72 pl-9" placeholder="Nomi, login, telefon, egasi…" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} /></div>
+          <div className="relative"><Search size={14} className="absolute left-3 top-[11px] text-muted" /><input className="input w-72 pl-9" placeholder="Nomi, login, telefon, egasi, email, viloyat…" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} /></div>
+          <Segmented value={active} onChange={(v) => { setActive(v); setPage(1); }} options={[['', 'Barcha'], ['1', 'Faol'], ['0', 'Bloklangan']]} />
           <select className="input" value={sort} onChange={(e) => setSort(e.target.value)}><option value="createdAt">Yangi avval</option><option value="name">Nomi bo'yicha</option></select>
         </Toolbar>
         <Table loading={loading} rows={data?.items || []} onRow={(r) => router.push(`/shops/${r.id}`)} cols={[
           { key: 'name', label: "Do'kon", render: (r) => (
             <div className="flex items-center gap-3">
               <Avatar src={photoUrl(r.logo)} name={r.name} />
-              <div className="min-w-0"><div className="flex items-center gap-1.5 font-medium">{r.name}{r.hasLocation && <MapPin size={12} className="text-muted" />}</div><div className="text-xs text-muted">@{r.login} · {r.ownerName}</div></div>
+              <div className="min-w-0">
+                <div className={`flex items-center gap-1.5 font-medium ${r.active ? '' : 'text-muted line-through'}`}>{r.name}{r.hasLocation && <MapPin size={12} className="text-muted" />}</div>
+                <div className="text-xs text-muted">@{r.login} · {r.ownerName}{r.aiName ? ` · AI: ${r.aiName}` : ''}</div>
+              </div>
             </div>
           ) },
-          { key: 'phone', label: 'Telefon', render: (r) => <span className="text-xs text-text-2">{r.phone}</span> },
+          { key: 'phone', label: 'Aloqa', render: (r) => <span className="text-xs text-text-2">{r.phone}{r.email ? <><br />{r.email}</> : null}</span> },
+          { key: 'region', label: 'Viloyat', render: (r) => <span className="text-xs text-text-2">{r.region || '—'}</span> },
           { key: 'products', label: 'Mahsulot', cls: 'text-right tabular-nums', render: (r) => num(r.products) },
           { key: 'views', label: "Ko'rish", cls: 'text-right tabular-nums', render: (r) => num(r.views) },
+          { key: 'followers', label: 'Obunachi', cls: 'text-right tabular-nums', render: (r) => num(r.followers) },
           { key: 'orders', label: 'Buyurtma', cls: 'text-right tabular-nums', render: (r) => <>{num(r.orders)}<span className="text-xs text-muted"> / {r.done}</span></> },
           { key: 'revenue', label: 'Tushum', cls: 'text-right tabular-nums font-medium', render: (r) => moneyShort(r.revenue) },
-          { key: 'sellers', label: 'Sotuvchi', cls: 'text-center', render: (r) => <Badge>{r.sellers}</Badge> },
+          { key: 'active', label: 'Holat', render: (r) => r.active ? <Badge tone="green">Faol</Badge> : <Badge tone="rose">Bloklangan</Badge> },
           { key: 'lastOrderAt', label: 'Oxirgi buyurtma', render: (r) => <span className="text-xs text-muted">{r.lastOrderAt ? ago(r.lastOrderAt) : '—'}</span> },
           { key: 'createdAt', label: 'Ochilgan', render: (r) => <span className="text-xs text-muted">{date(r.createdAt, false)}</span> },
         ]} />
