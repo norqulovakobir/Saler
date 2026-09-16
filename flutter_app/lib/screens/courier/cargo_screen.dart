@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../api.dart';
+import '../auth/buyer_auth.dart';
 import '../../l10n.dart';
 import '../../main.dart';
 import '../../models.dart';
@@ -170,6 +171,9 @@ class _CargoOrderSheetState extends State<_CargoOrderSheet> {
 
   Future<void> submit() async {
     if (sending) return;
+    // Buyurtma berish uchun tasdiqlangan xaridor hisobi kerak
+    if (!await ensureBuyer(context, title: tr('Buyurtma berish uchun kiring'))) return;
+    if (!mounted) return;
     if (fromR == null || toR == null) {
       setState(() => err = tr('Viloyatlarni tanlang'));
       return;

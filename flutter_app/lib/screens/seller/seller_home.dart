@@ -27,6 +27,7 @@ class SellerHome extends StatefulWidget {
 class _SellerHomeState extends State<SellerHome> {
   int index = 0;
   final keys = List.generate(5, (_) => GlobalKey<NavigatorState>());
+  final pager = PageController();
 
   @override
   void initState() {
@@ -35,12 +36,34 @@ class _SellerHomeState extends State<SellerHome> {
   }
 
   @override
+  void dispose() {
+    pager.dispose();
+    super.dispose();
+  }
+
+  /// Bo'limni almashtirish: tugma bosilganda yoki yonga surilganda
+  void _go(int i) {
+    if (i == index) {
+      keys[i].currentState?.popUntil((r) => r.isFirst);
+      return;
+    }
+    final from = index;
+    setState(() => index = i);
+    if (!pager.hasClients) return;
+    if ((i - from).abs() <= 1) {
+      pager.animateToPage(i, duration: const Duration(milliseconds: 260), curve: Curves.easeOutCubic);
+    } else {
+      pager.jumpToPage(i);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final st = AppState.instance;
     final p = context.p;
     final roots = [
       // "Yangi buyurtmalarni ko'rish" ikkinchi sahifa ochmaydi — shu yerda Buyurtmalar tabiga o'tadi
-      AnalyticsTab(onExit: widget.onExit, onOpenOrders: () => setState(() => index = 1)),
+      AnalyticsTab(onExit: widget.onExit, onOpenOrders: () => _go(1)),
       OrdersTab(onExit: widget.onExit),
       AdviceTab(onExit: widget.onExit),
       ProductsTab(onExit: widget.onExit),
@@ -59,7 +82,13 @@ class _SellerHomeState extends State<SellerHome> {
         child: Scaffold(
           extendBody: true,
           body: Stack(fit: StackFit.expand, children: [
-            IndexedStack(index: index, children: pages),
+            PageView(
+              controller: pager,
+              onPageChanged: (i) {
+                if (i != index) setState(() => index = i);
+              },
+              children: [for (final page in pages) KeepAlivePage(child: page)],
+            ),
             // Status bar shaffof: aylantirilgan kontent soat/batareya ostida ko'rinmasin — tepada fon rangli parda
             Positioned(
               top: 0,
@@ -72,7 +101,7 @@ class _SellerHomeState extends State<SellerHome> {
           bottomNavigationBar: FloatingNav(
             index: index,
             badges: {1: st.newOrders},
-            onTap: (i) => i == index ? keys[i].currentState?.popUntil((r) => r.isFirst) : setState(() => index = i),
+            onTap: _go,
             items: [
               NavItem(Icons.bar_chart_rounded, Icons.bar_chart_rounded, tr('Analitika')),
               NavItem(Icons.receipt_long_outlined, Icons.receipt_long_rounded, tr('Buyurtma')),
@@ -762,7 +791,10 @@ void openProductForm(BuildContext context, Product? p, VoidCallback onSaved) {
                         files = await ImagePicker().pickMultiImage(maxWidth: 1280, imageQuality: 85);
                       }
                       for (final f in files.take(10 - photos.length)) {
-                        photos.add('data:image/jpeg;base64,${base64Encode(await f.readAsBytes())}');
+                        photos.add(await Api.instance.uploadImage(
+                          await f.readAsBytes(),
+                          mime: Api.imageMimeForPath(f.path),
+                        ));
                       }
                       setSt(() {});
                     } catch (_) {
@@ -956,7 +988,11 @@ class ProfileTab extends StatelessWidget {
                       final f = await ImagePicker().pickImage(source: src, maxWidth: 512, imageQuality: 85);
                       if (f == null) return;
                       try {
-                        final r = await Api.instance.put('/api/seller/shop', {'logo': 'data:image/jpeg;base64,${base64Encode(await f.readAsBytes())}'});
+                        final logo = await Api.instance.uploadImage(
+                          await f.readAsBytes(),
+                          mime: Api.imageMimeForPath(f.path),
+                        );
+                        final r = await Api.instance.put('/api/seller/shop', {'logo': logo});
                         st.sellerShop = Shop.fromJson(r['shop']);
                         st.refresh();
                       } catch (e) {
@@ -965,6 +1001,8 @@ class ProfileTab extends StatelessWidget {
                     }),
               ]),
             ),
+            const SizedBox(height: 12),
+            _InstagramSellerInsights(shop: s),
             const SizedBox(height: 12),
             Container(
               decoration: BoxDecoration(color: p.card, borderRadius: BorderRadius.circular(20), boxShadow: softShadow(context), border: context.isDark ? Border.all(color: p.border) : null),
@@ -1222,37 +1260,364 @@ class ProfileTab extends StatelessWidget {
   }
 
   void _password(BuildContext context) {
-    final o = TextEditingController(), n = TextEditingController(), n2 = TextEditingController();
+    final o = TextEditingController(), n = TextEditingController(), n2 = TextEditingController(), code = TextEditingController();
+    var codeSent = false, busy = false;
+    String? devCode, error;
     showModalBottomSheet(
       useRootNavigator: true,
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (c) => Padding(
-        padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.of(c).viewInsets.bottom + 24),
+      builder: (c) => StatefulBuilder(
+        builder: (c, setSheet) => Padding(
+          padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.of(c).viewInsets.bottom + 24),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            const Text("Parolni o'zgartirish", style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -.4)),
+            const SizedBox(height: 5),
+            Text(codeSent ? 'Emailingizga yuborilgan 6 xonali kodni kiriting' : 'Yangi parol email-kod bilan tasdiqlanadi', style: TextStyle(fontSize: 13, color: c.p.muted)),
+            const SizedBox(height: 12),
+            TextField(controller: o, obscureText: true, enabled: !codeSent && !busy, decoration: const InputDecoration(labelText: 'Joriy parol')),
+            const SizedBox(height: 10),
+            TextField(controller: n, obscureText: true, enabled: !codeSent && !busy, decoration: const InputDecoration(labelText: 'Yangi parol (kamida 6 belgi)')),
+            if (!codeSent) ...[
+              const SizedBox(height: 10),
+              TextField(controller: n2, obscureText: true, enabled: !busy, decoration: const InputDecoration(labelText: 'Yangi parolni takrorlang')),
+            ] else ...[
+              const SizedBox(height: 10),
+              TextField(controller: code, keyboardType: TextInputType.number, maxLength: 6, enabled: !busy, decoration: const InputDecoration(labelText: '6 xonali tasdiqlash kodi', counterText: '')),
+              if (devCode != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text('Test kodi: $devCode', style: TextStyle(fontSize: 12, color: c.p.accentText, fontWeight: FontWeight.w800)),
+                ),
+            ],
+            if (error != null)
+              Padding(padding: const EdgeInsets.only(top: 8), child: Text(error!, style: TextStyle(fontSize: 12, color: c.p.danger, fontWeight: FontWeight.w700))),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              icon: busy ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : Icon(codeSent ? Icons.verified_rounded : Icons.mark_email_read_outlined, size: 18),
+              label: Text(codeSent ? 'Kod bilan tasdiqlash' : 'Emailga kod yuborish'),
+              onPressed: busy
+                  ? null
+                  : () async {
+                      if (n.text != n2.text && !codeSent) {
+                        setSheet(() => error = 'Parollar mos kelmadi');
+                        return;
+                      }
+                      setSheet(() {
+                        busy = true;
+                        error = null;
+                      });
+                      try {
+                        final result = await Api.instance.post('/api/seller/password', {
+                          'oldPassword': o.text,
+                          'newPassword': n.text,
+                          if (codeSent) 'code': code.text,
+                        });
+                        if (!c.mounted) return;
+                        if (!codeSent) {
+                          setSheet(() {
+                            codeSent = true;
+                            devCode = result['devCode']?.toString();
+                          });
+                        } else {
+                          Navigator.pop(c);
+                          if (context.mounted) showToast(context, "Parol email kodi bilan o'zgartirildi");
+                        }
+                      } catch (e) {
+                        if (c.mounted) setSheet(() => error = sellerErrorText(e));
+                      } finally {
+                        if (c.mounted) setSheet(() => busy = false);
+                      }
+                    },
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// Sotuvchining Instagram-uslubidagi professional profili: obunachilar,
+/// qamrov va har bir mahsulot postining haqiqiy ko'rish natijalari.
+class _InstagramSellerInsights extends StatefulWidget {
+  final Shop shop;
+  const _InstagramSellerInsights({required this.shop});
+
+  @override
+  State<_InstagramSellerInsights> createState() => _InstagramSellerInsightsState();
+}
+
+class _InstagramSellerInsightsState extends State<_InstagramSellerInsights> {
+  Map<String, dynamic>? data;
+  bool loading = true;
+  String? error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  int _n(dynamic value) => value is num ? value.toInt() : int.tryParse('$value') ?? 0;
+  String _short(int value) => value >= 1000000
+      ? '${(value / 1000000).toStringAsFixed(1)}M'
+      : value >= 1000
+          ? '${(value / 1000).toStringAsFixed(1)}K'
+          : '$value';
+  List<Map<String, dynamic>> _rows(dynamic raw) => (raw as List? ?? const [])
+      .whereType<Map>()
+      .map((row) => row.cast<String, dynamic>())
+      .toList();
+
+  Future<void> _load() async {
+    if (loading == false && !mounted) return;
+    setState(() {
+      loading = true;
+      error = null;
+    });
+    try {
+      final response = await Api.instance.get('/api/seller/audience');
+      if (!mounted) return;
+      setState(() {
+        data = response is Map ? response.cast<String, dynamic>() : <String, dynamic>{};
+        loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        error = sellerErrorText(e);
+        loading = false;
+      });
+    }
+  }
+
+  String _initials(String name) {
+    final words = name.trim().split(RegExp(r'\s+')).where((word) => word.isNotEmpty).take(2);
+    final text = words.map((word) => word[0]).join();
+    return text.isEmpty ? 'X' : text.toUpperCase();
+  }
+
+  void _followersSheet(List<Map<String, dynamic>> followers) {
+    showModalBottomSheet(
+      context: context,
+      useRootNavigator: true,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final p = sheetContext.p;
+        return SizedBox(
+          height: MediaQuery.of(sheetContext).size.height * .72,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              const Text('Obunachilar', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -.4)),
+              const SizedBox(height: 3),
+              Text('Eng yangi obunachilar va do\'koningizdagi faolligi', style: TextStyle(color: p.muted, fontSize: 13)),
+              const SizedBox(height: 12),
+              Expanded(
+                child: followers.isEmpty
+                    ? const EmptyBox(Icons.people_outline_rounded, 'Hali obunachilar yo\'q')
+                    : ListView.separated(
+                        itemCount: followers.length,
+                        separatorBuilder: (_, __) => Divider(height: 1, color: p.border),
+                        itemBuilder: (_, index) {
+                          final f = followers[index];
+                          final name = '${f['name'] ?? 'Xaridor'}';
+                          final last = '${f['lastProduct'] ?? ''}'.trim();
+                          return ListTile(
+                            contentPadding: const EdgeInsets.symmetric(vertical: 3),
+                            leading: CircleAvatar(
+                              backgroundColor: p.accentSoft,
+                              foregroundColor: p.accentText,
+                              child: Text(_initials(name), style: const TextStyle(fontWeight: FontWeight.w800)),
+                            ),
+                            title: Text(name, style: const TextStyle(fontWeight: FontWeight.w800)),
+                            subtitle: Text(
+                              last.isEmpty
+                                  ? 'Hali mahsulot ko\'rmagan'
+                                  : 'Oxirgi ko\'rgan: $last',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(color: p.muted, fontSize: 12),
+                            ),
+                            trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
+                              Text('${_n(f['views'])} ko\'rish', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+                              Text('${_n(f['orders'])} buyurtma', style: TextStyle(fontSize: 11, color: p.muted)),
+                            ]),
+                          );
+                        },
+                      ),
+              ),
+            ]),
+          ),
+        );
+      },
+    );
+  }
+
+  void _productSheet(Map<String, dynamic> product) {
+    final p = context.p;
+    final photo = product['photo']?.toString();
+    final name = '${product['name'] ?? 'Mahsulot'}';
+    showModalBottomSheet(
+      context: context,
+      useRootNavigator: true,
+      showDragHandle: true,
+      builder: (sheetContext) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 26),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          const Text("Parolni o'zgartirish", style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -.4)),
-          const SizedBox(height: 12),
-          TextField(controller: o, obscureText: true, decoration: const InputDecoration(labelText: 'Joriy parol')),
-          const SizedBox(height: 10),
-          TextField(controller: n, obscureText: true, decoration: const InputDecoration(labelText: 'Yangi parol (kamida 6 belgi)')),
-          const SizedBox(height: 10),
-          TextField(controller: n2, obscureText: true, decoration: const InputDecoration(labelText: 'Yangi parolni takrorlang')),
-          const SizedBox(height: 12),
-          FilledButton(
-              onPressed: () async {
-                if (n.text != n2.text) return showToast(c, 'Parollar mos kelmadi', error: true);
-                try {
-                  await Api.instance.post('/api/seller/password', {'oldPassword': o.text, 'newPassword': n.text});
-                  if (c.mounted) Navigator.pop(c);
-                  if (context.mounted) showToast(context, "Parol o'zgartirildi");
-                } catch (e) {
-                  if (c.mounted) showToast(c, sellerErrorText(e), error: true);
-                }
-              },
-              child: const Text("O'zgartirish")),
+          if (photo != null && photo.isNotEmpty)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(18),
+              child: SizedBox(height: 180, child: Image.network(Api.instance.photoUrl(photo), fit: BoxFit.cover)),
+            )
+          else
+            Container(height: 120, decoration: BoxDecoration(color: p.bg, borderRadius: BorderRadius.circular(18)), child: Icon(Icons.inventory_2_outlined, color: p.muted, size: 42)),
+          const SizedBox(height: 14),
+          Text(name, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 14),
+          Row(children: [
+            _detail(Icons.visibility_outlined, _short(_n(product['views'])), 'ko\'rish'),
+            _detail(Icons.people_outline_rounded, _short(_n(product['followerViews'])), 'obunachi'),
+            _detail(Icons.favorite_border_rounded, _short(_n(product['likes'])), 'layk'),
+            _detail(Icons.shopping_bag_outlined, _short(_n(product['sold'])), 'sotildi'),
+          ]),
         ]),
       ),
+    );
+  }
+
+  Widget _detail(IconData icon, String value, String label) => Expanded(
+        child: Column(children: [
+          Icon(icon, size: 19),
+          const SizedBox(height: 4),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w800)),
+          Text(label, style: TextStyle(fontSize: 10, color: context.p.muted)),
+        ]),
+      );
+
+  Widget _metric({required String value, required String label, VoidCallback? onTap}) => Expanded(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+            child: Column(children: [
+              Text(value, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w900, letterSpacing: -.4)),
+              const SizedBox(height: 2),
+              Text(label, textAlign: TextAlign.center, style: TextStyle(fontSize: 10, color: context.p.muted, fontWeight: FontWeight.w700)),
+            ]),
+          ),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    if (loading && data == null) {
+      return Container(
+        height: 200,
+        decoration: BoxDecoration(color: p.card, borderRadius: BorderRadius.circular(20), boxShadow: softShadow(context)),
+        padding: const EdgeInsets.all(16),
+        child: const Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [Skeleton(height: 42), SizedBox(height: 12), Skeleton(height: 104)]),
+      );
+    }
+    if (error != null && data == null) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: p.card, borderRadius: BorderRadius.circular(20), boxShadow: softShadow(context)),
+        child: EmptyBox(Icons.insights_outlined, error!, action: OutlinedButton.icon(onPressed: _load, icon: const Icon(Icons.refresh_rounded, size: 17), label: const Text('Qayta urinish'))),
+      );
+    }
+
+    final summary = (data?['summary'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
+    final followers = _rows(data?['followers']);
+    final products = _rows(data?['products']);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+      decoration: BoxDecoration(color: p.card, borderRadius: BorderRadius.circular(20), boxShadow: softShadow(context), border: context.isDark ? Border.all(color: p.border) : null),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          const Icon(Icons.insights_rounded, size: 19),
+          const SizedBox(width: 7),
+          const Expanded(child: Text('Professional profil', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900))),
+          IconButton(onPressed: loading ? null : _load, icon: const Icon(Icons.refresh_rounded, size: 19), tooltip: 'Yangilash'),
+        ]),
+        Row(children: [
+          _metric(value: '${widget.shop.productCount}', label: 'mahsulot', onTap: products.isEmpty ? null : () => _productSheet(products.first)),
+          _metric(value: _short(_n(summary['followers'])), label: 'obunachi', onTap: () => _followersSheet(followers)),
+          _metric(value: _short(_n(summary['reach'])), label: 'qamrov'),
+          _metric(value: _short(_n(summary['engagedFollowers'])), label: 'faol'),
+        ]),
+        const SizedBox(height: 12),
+        Row(children: [
+          Icon(Icons.grid_on_rounded, size: 17, color: p.accentText),
+          const SizedBox(width: 7),
+          const Expanded(child: Text('Mahsulotlar ko\'rishlari', style: TextStyle(fontWeight: FontWeight.w900))),
+          Text('${_short(_n(summary['likes']))} layk', style: TextStyle(fontSize: 11, color: p.muted, fontWeight: FontWeight.w700)),
+        ]),
+        const SizedBox(height: 10),
+        if (products.isEmpty)
+          Container(height: 94, alignment: Alignment.center, decoration: BoxDecoration(color: p.bg, borderRadius: BorderRadius.circular(14)), child: Text('Mahsulot qo\'shilgach ko\'rishlar shu yerda chiqadi', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: p.muted)))
+        else
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: products.length.clamp(0, 6),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 5, mainAxisSpacing: 5, childAspectRatio: .84),
+            itemBuilder: (_, index) {
+              final product = products[index];
+              final photo = product['photo']?.toString();
+              return InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => _productSheet(product),
+                child: Ink(
+                  decoration: BoxDecoration(color: p.bg, borderRadius: BorderRadius.circular(12)),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Stack(fit: StackFit.expand, children: [
+                      if (photo != null && photo.isNotEmpty)
+                        Image.network(Api.instance.photoUrl(photo), fit: BoxFit.cover)
+                      else
+                        Icon(Icons.inventory_2_outlined, color: p.muted),
+                      const DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0x00000000), Color(0xAA000000)]))),
+                      Positioned(
+                        left: 7,
+                        right: 7,
+                        bottom: 6,
+                        child: Row(children: [
+                          const Icon(Icons.visibility_outlined, color: Colors.white, size: 14),
+                          const SizedBox(width: 3),
+                          Expanded(child: Text(_short(_n(product['views'])), style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900))),
+                        ]),
+                      ),
+                    ]),
+                  ),
+                ),
+              );
+            },
+          ),
+        if (followers.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          Row(children: [
+            const Icon(Icons.people_alt_outlined, size: 17),
+            const SizedBox(width: 7),
+            const Expanded(child: Text('Yangi obunachilar', style: TextStyle(fontWeight: FontWeight.w900))),
+            TextButton(onPressed: () => _followersSheet(followers), child: const Text('Barchasi')),
+          ]),
+          for (final follower in followers.take(3))
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Row(children: [
+                CircleAvatar(radius: 16, backgroundColor: p.accentSoft, foregroundColor: p.accentText, child: Text(_initials('${follower['name'] ?? ''}'), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900))),
+                const SizedBox(width: 9),
+                Expanded(child: Text('${follower['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800))),
+                Text('${_n(follower['views'])} ko\'rish', style: TextStyle(fontSize: 11, color: p.muted, fontWeight: FontWeight.w700)),
+              ]),
+            ),
+        ],
+      ]),
     );
   }
 }

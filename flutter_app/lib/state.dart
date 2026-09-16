@@ -14,6 +14,42 @@ class CartItem {
   CartItem(this.product, this.qty);
 }
 
+/// Xaridor uchun ilova ichida saqlanadigan bildirishnoma.
+/// Serverdagi sotuvchi xabarnomalaridan alohida: telefon shu ilovaga kelgan
+/// yangi mahsulot va boshqa jonli hodisalarni keyin ham ko'rsatib bera oladi.
+class AppNotice {
+  final String id;
+  final String title;
+  final String body;
+  final DateTime createdAt;
+  bool read;
+
+  AppNotice({
+    required this.id,
+    required this.title,
+    required this.body,
+    required this.createdAt,
+    this.read = false,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'body': body,
+        'createdAt': createdAt.toIso8601String(),
+        'read': read,
+      };
+
+  factory AppNotice.fromJson(Map<String, dynamic> json) => AppNotice(
+        id: json['id']?.toString() ?? '',
+        title: json['title']?.toString() ?? '',
+        body: json['body']?.toString() ?? '',
+        createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
+            DateTime.now(),
+        read: json['read'] == true,
+      );
+}
+
 /// Ilova holati: mavzu, savatcha, sevimlilar, sotuvchi do'koni
 class AppState extends ChangeNotifier {
   AppState._();
@@ -28,6 +64,11 @@ class AppState extends ChangeNotifier {
   int newOrders = 0;
   int unread = 0;
 
+  /// Xaridor ko'radigan lokal bildirishnomalar. Oxirgi 60 tasi telefonda
+  /// saqlanadi, shu bois qo'ng'iroqcha bosilganda yo'qolib ketmaydi.
+  final List<AppNotice> notices = [];
+  int get noticeUnread => notices.where((notice) => !notice.read).length;
+
   /// Tanishtiruv (til tanlash va bannerlar) ko'rilganmi: faqat birinchi kirishda ko'rsatiladi
   bool onboarded = false;
 
@@ -37,11 +78,22 @@ class AppState extends ChangeNotifier {
     (await SharedPreferences.getInstance()).setBool('onboarded', true);
   }
 
+  /// Rol tanlangan (xaridor, sotuvchi, kuryer, yuk tashuvchi): tanishtiruvdan keyin bir marta so'raladi
+  bool rolePicked = false;
+
+  Future<void> setRolePicked() async {
+    rolePicked = true;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setBool('rolePicked', true);
+  }
+
   Future<void> load() async {
     final p = await SharedPreferences.getInstance();
     onboarded = p.getBool('onboarded') ?? false;
+    rolePicked = p.getBool('rolePicked') ?? false;
     themeMode = ThemeMode.values[p.getInt('theme') ?? 0];
-    L10n.lang = AppLang.values[(p.getInt('lang') ?? 0).clamp(0, AppLang.values.length - 1)];
+    L10n.lang = AppLang
+        .values[(p.getInt('lang') ?? 0).clamp(0, AppLang.values.length - 1)];
     for (final s in p.getStringList('favs') ?? const []) {
       final pr = Product.fromJson(jsonDecode(s));
       favs[pr.id] = pr;
@@ -49,6 +101,13 @@ class AppState extends ChangeNotifier {
     for (final s in p.getStringList('cart') ?? const []) {
       final j = jsonDecode(s);
       cart.add(CartItem(Product.fromJson(j['p']), j['q']));
+    }
+    notices.clear();
+    for (final s in p.getStringList('notices') ?? const []) {
+      try {
+        notices.add(AppNotice.fromJson(
+            Map<String, dynamic>.from(jsonDecode(s) as Map)));
+      } catch (_) {}
     }
     try {
       final me = await Api.instance.get('/api/me');
@@ -86,8 +145,51 @@ class AppState extends ChangeNotifier {
     (await SharedPreferences.getInstance()).setInt('theme', m.index);
   }
 
-  Future<void> _saveFavs() async => (await SharedPreferences.getInstance()).setStringList('favs', favs.values.map((p) => jsonEncode(p.toJson())).toList());
-  Future<void> _saveCart() async => (await SharedPreferences.getInstance()).setStringList('cart', cart.map((c) => jsonEncode({'p': c.product.toJson(), 'q': c.qty})).toList());
+  Future<void> _saveFavs() async =>
+      (await SharedPreferences.getInstance()).setStringList(
+          'favs', favs.values.map((p) => jsonEncode(p.toJson())).toList());
+  Future<void> _saveCart() async =>
+      (await SharedPreferences.getInstance()).setStringList(
+          'cart',
+          cart
+              .map((c) => jsonEncode({'p': c.product.toJson(), 'q': c.qty}))
+              .toList());
+  Future<void> _saveNotices() async =>
+      (await SharedPreferences.getInstance()).setStringList('notices',
+          notices.map((notice) => jsonEncode(notice.toJson())).toList());
+
+  void _recordNotice(String title, String body, {String? id}) {
+    final noticeId = id?.isNotEmpty == true
+        ? id!
+        : 'local_${DateTime.now().microsecondsSinceEpoch}';
+    final existing = notices.indexWhere((notice) => notice.id == noticeId);
+    if (existing >= 0) notices.removeAt(existing);
+    notices.insert(
+        0,
+        AppNotice(
+            id: noticeId,
+            title: title.trim().isEmpty ? 'Rydex' : title.trim(),
+            body: body.trim(),
+            createdAt: DateTime.now()));
+    if (notices.length > 60) notices.removeRange(60, notices.length);
+    unawaited(_saveNotices());
+  }
+
+  void markNoticesRead() {
+    if (notices.every((notice) => notice.read)) return;
+    for (final notice in notices) {
+      notice.read = true;
+    }
+    unawaited(_saveNotices());
+    notifyListeners();
+  }
+
+  void clearNotices() {
+    if (notices.isEmpty) return;
+    notices.clear();
+    unawaited(_saveNotices());
+    notifyListeners();
+  }
 
   bool isFav(String id) => favs.containsKey(id);
   void toggleFav(Product p) {
@@ -141,9 +243,15 @@ class AppState extends ChangeNotifier {
     liveVersion++;
     if (e.type == 'notification') {
       _lastNotifId = e.data['id']?.toString() ?? _lastNotifId;
-      Notify.instance.show(e.data['title']?.toString() ?? '', e.data['text']?.toString() ?? '');
+      final title = e.data['title']?.toString() ?? '';
+      final text = e.data['text']?.toString() ?? '';
+      _recordNotice(title, text, id: _lastNotifId);
+      unawaited(Notify.instance.show(title, text));
     } else if (e.type == 'product:new') {
-      Notify.instance.show("${e.data['shopName'] ?? "Do'kon"}: yangi mahsulot", e.data['name']?.toString() ?? '');
+      final title = "${e.data['shopName'] ?? "Do'kon"}: yangi mahsulot";
+      final text = e.data['name']?.toString() ?? '';
+      _recordNotice(title, text, id: e.data['id']?.toString());
+      unawaited(Notify.instance.show(title, text));
     }
     if (sellerShop != null) refreshBadges();
     notifyListeners();
@@ -174,7 +282,11 @@ class AppState extends ChangeNotifier {
       unread = b['unread'] ?? 0;
       // Yangi buyurtma paydo bo'ldi — qurilmaga bildirishnoma
       // Jonli aloqa bo'lsa bildirishnoma hodisa bilan allaqachon kelgan, takrorlanmaydi
-      if (_lastNewOrders != null && newOrders > _lastNewOrders! && !Realtime.instance.connected) await _notifyNewOrder();
+      if (_lastNewOrders != null &&
+          newOrders > _lastNewOrders! &&
+          !Realtime.instance.connected) {
+        await _notifyNewOrder();
+      }
       _lastNewOrders = newOrders;
       notifyListeners();
     } catch (_) {}
@@ -182,13 +294,19 @@ class AppState extends ChangeNotifier {
 
   Future<void> _notifyNewOrder() async {
     try {
-      final list = (await Api.instance.get('/api/seller/notifications')) as List;
-      final n = list.cast<Map<String, dynamic>>().where((x) => x['type'] == 'order').firstOrNull;
+      final list =
+          (await Api.instance.get('/api/seller/notifications')) as List;
+      final n = list
+          .cast<Map<String, dynamic>>()
+          .where((x) => x['type'] == 'order')
+          .firstOrNull;
       if (n == null || n['id'] == _lastNotifId) return;
       _lastNotifId = n['id'];
-      await Notify.instance.show(n['title'] ?? 'Yangi buyurtma', n['text'] ?? '');
+      await Notify.instance
+          .show(n['title'] ?? 'Yangi buyurtma', n['text'] ?? '');
     } catch (_) {
-      await Notify.instance.show('Yangi buyurtma', "Do'koningizga yangi buyurtma tushdi");
+      await Notify.instance
+          .show('Yangi buyurtma', "Do'koningizga yangi buyurtma tushdi");
     }
   }
 }

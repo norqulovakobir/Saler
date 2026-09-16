@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' show ImageFilter, PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,11 +10,19 @@ import '../models.dart';
 import '../state.dart';
 import '../theme.dart';
 import '../widgets.dart';
+import 'auth/buyer_auth.dart';
 import 'chat_screen.dart';
 import 'shops_screen.dart';
 
 /// Reels bo'limi pastki paneldagi o'rni
 const reelsTabIndex = 1;
+
+/// Birinchi ochilishda 5 ta reel olinadi, keyin har safar 2 tadan — serverdan bir vaqtda ko'p ma'lumot tortilmaydi
+const _firstPage = 5;
+const _nextPage = 2;
+
+/// Oldinda shuncha reel qolganda keyingi bo'lak so'raladi (3-chisiga kelganda)
+const _prefetchGap = 3;
 
 /// Reels elementi: mahsulot, do'kon, layk va nega ko'rsatilgani
 class _Reel {
@@ -64,6 +73,7 @@ class _ReelsScreenState extends State<ReelsScreen> with WidgetsBindingObserver {
   DateTime? _shownAt; // joriy reel ekranga chiqqan vaqt (ko'rish davomiyligi uchun)
   int _seenLive = AppState.instance.liveVersion;
   bool freshFromFollowed = false; // obuna bo'lingan do'kondan yangi mahsulot keldi
+  int _feedVersion = 0;
 
   @override
   void initState() {
@@ -100,6 +110,11 @@ class _ReelsScreenState extends State<ReelsScreen> with WidgetsBindingObserver {
 
   void _onLive() {
     final st = AppState.instance;
+    // Foydalanuvchi endigina tizimga kirdi: Reels yuklanadi
+    if (Api.instance.registered && items.isEmpty && !loading && mounted) {
+      load();
+      return;
+    }
     if (st.liveVersion == _seenLive) return;
     _seenLive = st.liveVersion;
     if (st.lastEvent?.type == 'product:new' && mounted) setState(() => freshFromFollowed = true);
@@ -120,19 +135,29 @@ class _ReelsScreenState extends State<ReelsScreen> with WidgetsBindingObserver {
   List<_Reel> _parse(dynamic r) => ((r['items'] as List?) ?? const []).map((e) => _Reel.fromJson(e as Map)).toList();
 
   Future<void> load({bool refresh = false}) async {
+    if (!Api.instance.registered) {
+      if (mounted) setState(() => loading = false);
+      return;
+    }
     if (refresh) {
       _sendView();
       seed = null;
       freshFromFollowed = false;
     }
+    // Bir vaqtning o'zida kelgan eski javob yangi tasmani ustiga yozmasin.
+    final version = ++_feedVersion;
     setState(() {
       loading = true;
       error = null;
     });
     try {
-      final r = await Api.instance.get('/api/reels?limit=8&offset=0${seed != null ? '&seed=$seed' : ''}');
+      final r = await Api.instance.get('/api/reels?limit=$_firstPage&offset=0${seed != null ? '&seed=$seed' : ''}');
       final list = _parse(r);
-      if (!mounted) return;
+      if (!mounted || version != _feedVersion) return;
+      // Tasmani almashtirishdan avval PageView'ni boshiga qaytaramiz.
+      // Aks holda eski 2-reel ochiq turgan paytda yangi ro'yxat 1 ta bo'lsa
+      // Flutter vaqtincha 1-indeksni o'qishga urinib RangeError berishi mumkin.
+      if (_pager.hasClients) _pager.jumpToPage(0);
       setState(() {
         items
           ..clear()
@@ -142,7 +167,6 @@ class _ReelsScreenState extends State<ReelsScreen> with WidgetsBindingObserver {
         loading = false;
         current = 0;
       });
-      if (_pager.hasClients) _pager.jumpToPage(0);
       _startTiming();
       _precache(0);
     } catch (e) {
@@ -159,7 +183,7 @@ class _ReelsScreenState extends State<ReelsScreen> with WidgetsBindingObserver {
     if (loadingMore || !hasMore || seed == null) return;
     loadingMore = true;
     try {
-      final r = await Api.instance.get('/api/reels?limit=8&offset=${items.length}&seed=$seed');
+      final r = await Api.instance.get('/api/reels?limit=$_nextPage&offset=${items.length}&seed=$seed');
       final list = _parse(r);
       if (!mounted) return;
       final have = items.map((x) => x.product.id).toSet();
@@ -167,6 +191,13 @@ class _ReelsScreenState extends State<ReelsScreen> with WidgetsBindingObserver {
         items.addAll(list.where((x) => !have.contains(x.product.id)));
         hasMore = r['hasMore'] == true && list.isNotEmpty;
       });
+      _precache(current);
+      // Tez surilganda zaxira tugab qolmasin: hali oldinda 3 tadan kam bo'lsa, yana bir bo'lak
+      if (hasMore && current >= items.length - _prefetchGap) {
+        loadingMore = false;
+        unawaited(loadMore());
+        return;
+      }
     } catch (_) {
       // Keyingi surishda qayta urinadi
     } finally {
@@ -175,11 +206,17 @@ class _ReelsScreenState extends State<ReelsScreen> with WidgetsBindingObserver {
   }
 
   void _onPage(int i) {
+    // PageView eski kadrni bir frame ushlab turishi mumkin; yangi kichik
+    // bo'lak kelganida ro'yxatdan tashqari indeksga hech qachon murojaat qilmaymiz.
+    if (i < 0 || i >= items.length) return;
     _sendView();
     setState(() => current = i);
     _startTiming();
     _precache(i);
-    if (i >= items.length - 3) loadMore();
+    // 3-, 6-, 9-... reelga kelganda navbatdagi 2 ta element fonda so'raladi.
+    // Juda tez surilganda oxirgi elementga kelish ham zaxira so'rovini ishga
+    // tushiradi, shuning uchun bo'sh ekran chiqmaydi.
+    if ((i + 1) % _prefetchGap == 0 || i >= items.length - 1) loadMore();
   }
 
   /// Keyingi ikki reelning birinchi rasmi oldindan yuklanadi, surilganda darhol chiqadi
@@ -328,7 +365,21 @@ class _ReelsScreenState extends State<ReelsScreen> with WidgetsBindingObserver {
     );
   }
 
+  /// Reels faqat tasdiqlangan xaridorga ko'rinadi (qiziqishlar shu hisobga bog'lanadi)
+  Future<void> _signIn() async {
+    final ok = await ensureBuyer(context,
+        title: tr("Reels uchun tizimga kiring"), subtitle: tr("Qiziqishlaringizga mos mahsulotlarni ko'rsatamiz"));
+    if (ok && mounted) load(refresh: true);
+  }
+
   Widget _body() {
+    if (!Api.instance.registered) {
+      return _Message(
+        icon: Icons.play_circle_outline_rounded,
+        text: tr("Reels'ni ko'rish uchun tizimga kiring"),
+        action: FilledButton.icon(onPressed: _signIn, icon: const Icon(Icons.login_rounded, size: 18), label: Text(tr('Kirish'))),
+      );
+    }
     if (loading && items.isEmpty) return const Center(child: CircularProgressIndicator(color: Colors.white70, strokeWidth: 2.5));
     if (error != null && items.isEmpty) {
       return _Message(
@@ -346,6 +397,8 @@ class _ReelsScreenState extends State<ReelsScreen> with WidgetsBindingObserver {
       onPageChanged: _onPage,
       itemCount: items.length,
       itemBuilder: (_, i) {
+        // Async refresh bilan PageView orasidagi bitta frame uchun himoya.
+        if (i < 0 || i >= items.length) return const SizedBox.expand();
         final r = items[i];
         return _ReelPage(
           key: ValueKey(r.product.id),

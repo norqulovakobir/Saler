@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../api.dart';
+import '../auth/buyer_auth.dart';
 import '../../l10n.dart';
 import '../../models.dart';
 import '../../theme.dart';
@@ -304,6 +305,9 @@ class _HireSheetState extends State<_HireSheet> {
 
   Future<void> submit() async {
     if (sending) return;
+    // Buyurtma berish uchun tasdiqlangan xaridor hisobi kerak
+    if (!await ensureBuyer(context, title: tr('Buyurtma berish uchun kiring'))) return;
+    if (!mounted) return;
     final c = widget.courier;
     setState(() {
       sending = true;

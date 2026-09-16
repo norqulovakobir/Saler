@@ -31,7 +31,7 @@ export default function Login() {
       <form onSubmit={submit} className="card w-full max-w-[360px] p-7">
         <div className="mb-6 flex items-center gap-3">
           <div className="grid h-10 w-10 place-items-center rounded-xl bg-accent text-[15px] font-bold text-accent-fg">S</div>
-          <div><h1 className="text-[15px] font-semibold tracking-tight">Saler AI Admin</h1><p className="text-xs text-muted">Boshqaruv paneliga kirish</p></div>
+          <div><h1 className="text-[15px] font-semibold tracking-tight">Rydex Admin</h1><p className="text-xs text-muted">Boshqaruv paneliga kirish</p></div>
         </div>
         <label className="kicker mb-1.5 block">Admin parol</label>
         <input className="input w-full" type="password" autoFocus value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />

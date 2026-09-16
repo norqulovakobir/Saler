@@ -2,8 +2,8 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowUpRight, Bike, Eye, MapPin, Package, Receipt, RefreshCw, Search, ShoppingCart, Store, Users, Wallet, X } from 'lucide-react';
-import { Avatar, Card, ErrorBox, PageTitle, Stat, StatusBadge, Table } from '@/components/ui';
+import { ArrowUpRight, Bike, Eye, MailCheck, MapPin, Package, Receipt, RefreshCw, Search, ShoppingCart, Store, Truck, Users, Wallet, X } from 'lucide-react';
+import { Avatar, Badge, Card, ErrorBox, PageTitle, Stat, StatusBadge, Table } from '@/components/ui';
 import { AreaSeries, Bars, Donut } from '@/components/charts';
 import { useApi, useDebounced } from '@/lib/hooks';
 import { photoUrl } from '@/lib/api';
@@ -47,6 +47,24 @@ function ShopSearch() {
   );
 }
 
+/** Rollar bo'yicha ro'yxatdan o'tganlar */
+function Registrations({ r, loading }) {
+  const items = r ? [
+    { label: 'Xaridorlar', value: r.buyers, sub: `${num(r.guests)} mehmon · +${r.week.buyers} hafta`, icon: Users },
+    { label: 'Sotuvchilar', value: r.sellers, sub: `+${r.week.sellers} hafta`, icon: Store },
+    { label: 'Kuryerlar', value: r.couriers, sub: `+${r.week.couriers} hafta`, icon: Bike },
+    { label: 'Yuk tashuvchilar', value: r.carriers, sub: `+${r.week.carriers} hafta`, icon: Truck },
+    { label: 'Tasdiqlangan email', value: r.verifiedEmails, sub: `${num(r.pendingCodes)} ta kod kutilmoqda`, icon: MailCheck },
+  ] : Array.from({ length: 5 }, () => ({}));
+  return (
+    <Card title="Ro'yxatdan o'tganlar" sub="Rollar bo'yicha hisoblar" className="mb-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+        {items.map((x, i) => <Stat key={x.label || i} loading={loading} label={x.label} value={x.value != null ? num(x.value) : undefined} sub={x.sub} icon={x.icon} />)}
+      </div>
+    </Card>
+  );
+}
+
 export default function Dashboard() {
   const [days, setDays] = useState(30);
   const ov = useApi('/overview', { refreshMs: 60000 });
@@ -65,6 +83,7 @@ export default function Dashboard() {
       </>} />
       <ErrorBox error={ov.error} retry={ov.reload} />
 
+      <Registrations r={o?.registrations} loading={L} />
       <ShopSearch />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">

@@ -28,12 +28,19 @@ Bazani va rasmlarni Supabase'ga ulash, Render'dan ma'lumot ko'chirish: [`deploy/
 
 Baza, server va HTTPS'ni bitta bepul Oracle serveriga o'rnatish: [`deploy/oracle/README.md`](../deploy/oracle/README.md).
 
+## Hetzner Cloud + PgBouncer
+
+PostgreSQL connection pool, HTTPS va backup bilan pullik, barqaror serverga o'rnatish: [`deploy/hetzner/README.md`](../deploy/hetzner/README.md).
+
 ## Muhit o'zgaruvchilari
 
 | Nomi | Majburiy | Izoh |
 |---|---|---|
 | `DATABASE_URL` | ha | Postgres connection string |
 | `PORT` | yo'q | Render o'zi beradi |
+| `DATABASE_SSL` | yo'q | Lokal Postgres/PgBouncer uchun `false`; tashqi SSL baza uchun `true` |
+| `DB_POOL_MAX` | yo'q | Node process ochadigan maksimum Postgres connection, standart `8` |
+| `DB_QUERY_TIMEOUT_MS` | yo'q | Bitta SQL so'rovning client timeouti, standart `25000` ms |
 | `ADMIN_PASSWORD` | ha | Admin panel paroli |
 | `GEMINI_API_KEY` | yo'q | Google Gemini: AI yordamchi, do'kon chati, maslahatlar |
 | `GEMINI_MODEL` | yo'q | Standart `gemini-3.6-flash` |

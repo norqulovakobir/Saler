@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { migrate, one } from './db.js';
+import { closeDb, migrate, one } from './db.js';
 import { storageEnabled, publicUrl, ensureBucket, BUCKET } from './storage.js';
 import { HttpError, ah, log } from './util.js';
 import adminRouter from './admin.js';
@@ -10,9 +10,18 @@ const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
 app.use(cors());
+// Sekin so'rovlarni logga yozadi: ilova qotib qolsa, sababini darhol ko'rish uchun
+app.use((req, res, next) => {
+  const t0 = process.hrtime.bigint();
+  res.on('finish', () => {
+    const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+    if (ms > 500) log('SEKIN', `${req.method} ${req.originalUrl.split('?')[0]} ${Math.round(ms)} ms`);
+  });
+  next();
+});
 app.use(express.json({ limit: '60mb' }));
 
-app.get('/', (_req, res) => res.json({ ok: true, name: 'Saler AI server', time: new Date().toISOString() }));
+app.get('/', (_req, res) => res.json({ ok: true, name: 'Rydex server', time: new Date().toISOString() }));
 app.get('/health', (_req, res) => res.json({ ok: true }));
 // Bazaga haqiqiy so'rov yuboradi. Supabase bepul loyihasi 7 kun so'rovsiz qolib to'xtab qolmasligi uchun kuniga bir marta chaqirish mumkin.
 app.get('/health/db', ah(async (_req, res) => {
@@ -47,11 +56,51 @@ app.use((err, _req, res, _next) => {
 });
 
 const port = Number(process.env.PORT) || 3000;
-migrate()
-  .then(() => (storageEnabled
-    ? ensureBucket()
-      .then((s) => log(`Rasmlar Supabase Storage'da: "${BUCKET}" bucket ${s}`))
-      .catch((e) => log('ERROR', `Supabase Storage: ${e.message}`))
-    : log("Rasmlar Postgres'da saqlanadi (SUPABASE_URL berilmagan)")))
-  .then(() => app.listen(port, '0.0.0.0', () => log(`Saler server ${port}-portda ishlayapti`)))
-  .catch((e) => { console.error('DB migratsiya xatosi:', e); process.exit(1); });
+let httpServer;
+let shuttingDown = false;
+
+async function setupStorage() {
+  if (!storageEnabled) {
+    log("Rasmlar Postgres'da saqlanadi (SUPABASE_URL berilmagan)");
+    return;
+  }
+  try {
+    const status = await ensureBucket();
+    log(`Rasmlar Supabase Storage'da: "${BUCKET}" bucket ${status}`);
+  } catch (error) {
+    log('ERROR', `Supabase Storage: ${error.message}`);
+  }
+}
+
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  log(`Saler server ${signal} signalini oldi, so'rovlar yakunlanmoqda`);
+  const forceTimer = setTimeout(() => process.exit(1), 15_000);
+  forceTimer.unref();
+  try {
+    await Promise.all([
+      new Promise((resolve) => httpServer ? httpServer.close(resolve) : resolve()),
+      closeDb(),
+    ]);
+    clearTimeout(forceTimer);
+    process.exit(0);
+  } catch (error) {
+    console.error('Serverni toza to‘xtatib bo‘lmadi:', error);
+    process.exit(1);
+  }
+}
+
+process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
+process.once('SIGINT', () => { void shutdown('SIGINT'); });
+
+async function start() {
+  await migrate();
+  await setupStorage();
+  httpServer = app.listen(port, '0.0.0.0', () => log(`Saler server ${port}-portda ishlayapti`));
+}
+
+start().catch((error) => {
+  console.error('DB migratsiya xatosi:', error);
+  process.exit(1);
+});

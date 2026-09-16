@@ -124,8 +124,15 @@ class _AnalyticsTabState extends State<AnalyticsTab> {
   int pct(num a, num b) => b == 0 ? 0 : ((a / b) * 100).round();
   int n(dynamic v) => (v is num) ? v.round() : 0;
   String monthName(String key) {
-    final p = key.split('-');
-    return '${monthsUz[int.parse(p[1]) - 1]} ${p[0]}';
+    // Postgres date_trunc ayrim drayverlarda "2026-09", ayrimlarida esa
+    // faqat yilni qaytarishi mumkin. Hisobotning o'zi xatoga tushmasligi
+    // uchun qism yetarli bo'lmaganda xavfsiz sarlavha qaytaramiz.
+    final match = RegExp(r'^(\\d{4})-(\\d{1,2})').firstMatch(key.trim());
+    final month = int.tryParse(match?.group(2) ?? '');
+    if (match == null || month == null || month < 1 || month > 12) {
+      return key.trim().isEmpty ? tr('Bu oy') : key;
+    }
+    return '${monthsUz[month - 1]} ${match.group(1)}';
   }
 
   // ---- kichik komponentlar ----

@@ -1,5 +1,5 @@
 'use client';
-import { Activity, Bot, Cpu, Database, HardDrive, RefreshCw } from 'lucide-react';
+import { Activity, Cpu, Database, HardDrive, Mail, RefreshCw } from 'lucide-react';
 import { Card, ErrorBox, PageTitle, Stat } from '@/components/ui';
 import { useApi } from '@/lib/hooks';
 import { API_URL } from '@/lib/api';
@@ -18,13 +18,18 @@ export default function SystemPage() {
         <Stat loading={L} label="Xotira (RSS)" value={s && bytes(s.memory.rss)} sub={s && `Heap ${bytes(s.memory.heapUsed)} / ${bytes(s.memory.heapTotal)}`} icon={Cpu} />
         <Stat loading={L} label="Baza hajmi" value={s && (s.db ? bytes(s.db.dataSize) : '—')} sub={s?.db && `${num(s.db.objects)} hujjat · ${s.db.collections} kolleksiya`} icon={Database} />
         <Stat loading={L} label="Yuklangan rasmlar" value={s && num(s.uploads.files)} sub={s && bytes(s.uploads.bytes)} icon={HardDrive} />
-        <Stat loading={L} label="Telegram bot" value={s && (s.bot ? `@${s.bot.username}` : '—')} sub={s?.bot && s.bot.name} icon={Bot} />
+        <Stat loading={L} label="Email (EmailJS)" icon={Mail}
+          value={s && (s.email?.enabled ? 'Ulangan' : s.email?.devCodes ? 'Test rejimi' : 'Sozlanmagan')}
+          sub={s && (s.email?.enabled
+            ? (s.email.privateKey ? 'Kodlar yuborilmoqda' : 'Private key kiritilmagan')
+            : s.email?.devCodes ? 'Kodlar server logida' : 'EMAILJS_* kalitlari kerak')} />
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-3">
         <Card title="Sozlamalar">
           {s && <dl className="space-y-2 text-xs">
-            {[['AI model', s.env.groqModel], ['Vision model', s.env.visionModel], ['Redis kesh', s.env.redis ? 'Ulangan' : 'Xotira keshi'], ['Port', s.env.port], ['Mini App URL', s.env.webappUrl || '—'], ['Platforma', s.platform], ['CPU yuklama (1/5/15)', s.cpuLoad.map((x) => x.toFixed(2)).join(' / ')]].map(([k, v]) => (
+            {[['Email xizmati', s.email?.enabled ? 'EmailJS ulangan' : s.email?.devCodes ? 'Test rejimi (kod logda)' : 'Sozlanmagan'],
+            ['AI model', s.env.groqModel], ['Vision model', s.env.visionModel], ['Redis kesh', s.env.redis ? 'Ulangan' : 'Xotira keshi'], ['Port', s.env.port], ['Mini App URL', s.env.webappUrl || '—'], ['Platforma', s.platform], ['CPU yuklama (1/5/15)', s.cpuLoad.map((x) => x.toFixed(2)).join(' / ')]].map(([k, v]) => (
               <div key={k} className="flex justify-between gap-3 border-b border-line pb-2 last:border-0"><dt className="text-muted">{k}</dt><dd className="truncate text-right font-medium text-text-2">{v}</dd></div>
             ))}
           </dl>}

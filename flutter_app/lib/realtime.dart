@@ -56,7 +56,7 @@ class Realtime {
 
   Future<void> _connect() async {
     // Veb-brauzerda http javobi bo'laklab kelmaydi; u yerda davriy so'rovlar ishlaydi
-    if (!_running || kIsWeb) return;
+    if (!_running || kIsWeb || !realtimeEnabled) return;
     final gen = ++_generation;
     _sub?.cancel();
     _client?.close();

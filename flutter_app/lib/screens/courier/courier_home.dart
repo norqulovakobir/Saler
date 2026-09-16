@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -72,6 +71,7 @@ class CourierHome extends StatefulWidget {
 class _CourierHomeState extends State<CourierHome> {
   int index = 0;
   final keys = List.generate(4, (_) => GlobalKey<NavigatorState>());
+  final pager = PageController();
   // Daromad tabi ochilganda statistikani yangilash signali
   final _statsTick = ValueNotifier<int>(0);
   Timer? _loc;
@@ -86,6 +86,7 @@ class _CourierHomeState extends State<CourierHome> {
   void dispose() {
     _loc?.cancel();
     _statsTick.dispose();
+    pager.dispose();
     super.dispose();
   }
 
@@ -131,7 +132,14 @@ class _CourierHomeState extends State<CourierHome> {
       return;
     }
     if (i == 1) _statsTick.value++;
+    final from = index;
     setState(() => index = i);
+    if (!pager.hasClients) return;
+    if ((i - from).abs() <= 1) {
+      pager.animateToPage(i, duration: const Duration(milliseconds: 260), curve: Curves.easeOutCubic);
+    } else {
+      pager.jumpToPage(i);
+    }
   }
 
   @override
@@ -156,7 +164,17 @@ class _CourierHomeState extends State<CourierHome> {
         },
         child: Scaffold(
           extendBody: true,
-          body: IndexedStack(index: index, children: pages),
+          body: PageView(
+            controller: pager,
+            // Xarita tabida yonga surish xaritaning o'ziga tegishli
+            physics: index == 2 ? const NeverScrollableScrollPhysics() : const PageScrollPhysics(),
+            onPageChanged: (i) {
+              if (i == index) return;
+              if (i == 1) _statsTick.value++;
+              setState(() => index = i);
+            },
+            children: [for (final page in pages) KeepAlivePage(child: page)],
+          ),
           // Xarita tabida panel yashirinadi
           bottomNavigationBar: index == 2
               ? null
@@ -1708,12 +1726,84 @@ class CourierProfileTab extends StatelessWidget {
     final f = await ImagePicker().pickImage(source: src, maxWidth: 512, imageQuality: 85);
     if (f == null) return;
     try {
-      final r = await Api.instance.put('/api/courier/profile', {'photo': 'data:image/jpeg;base64,${base64Encode(await f.readAsBytes())}'});
+      final photo = await Api.instance.uploadImage(
+        await f.readAsBytes(),
+        mime: Api.imageMimeForPath(f.path),
+      );
+      final r = await Api.instance.put('/api/courier/profile', {'photo': photo});
       AppState.instance.courier = Courier.fromJson(r['courier']).copyWith(online: AppState.instance.courier?.online);
       AppState.instance.refresh();
     } catch (e) {
       if (context.mounted) showToast(context, _errText(e), error: true);
     }
+  }
+
+  /// Joriy parol + aynan shu profil emailiga yuborilgan kod bo'lmasa parol saqlanmaydi.
+  void _password(BuildContext context) {
+    final old = TextEditingController(), fresh = TextEditingController(), repeat = TextEditingController(), code = TextEditingController();
+    var codeSent = false, busy = false;
+    String? devCode, error;
+    showModalBottomSheet(
+      context: context,
+      useRootNavigator: true,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheet) => StatefulBuilder(
+        builder: (sheet, setSheet) => Padding(
+          padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.of(sheet).viewInsets.bottom + 24),
+          child: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text(tr("Parolni o'zgartirish"), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -.4)),
+              const SizedBox(height: 5),
+              Text(codeSent ? tr('Aynan profilingiz emailiga yuborilgan 6 xonali kodni kiriting') : tr("Joriy parol va email kodi bilan himoyalangan"), style: TextStyle(fontSize: 13, color: sheet.p.muted)),
+              const SizedBox(height: 12),
+              TextField(controller: old, obscureText: true, enabled: !codeSent && !busy, decoration: InputDecoration(labelText: tr('Joriy parol'))),
+              const SizedBox(height: 10),
+              TextField(controller: fresh, obscureText: true, enabled: !codeSent && !busy, decoration: InputDecoration(labelText: tr('Yangi parol (kamida 6 belgi)'))),
+              if (!codeSent) ...[
+                const SizedBox(height: 10),
+                TextField(controller: repeat, obscureText: true, enabled: !busy, decoration: InputDecoration(labelText: tr('Yangi parolni takrorlang'))),
+              ] else ...[
+                const SizedBox(height: 10),
+                TextField(controller: code, keyboardType: TextInputType.number, maxLength: 6, enabled: !busy, decoration: InputDecoration(labelText: tr('6 xonali tasdiqlash kodi'), counterText: '')),
+                if (devCode != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text('${tr('Test kodi')}: $devCode', style: TextStyle(fontSize: 12, color: sheet.p.accentText, fontWeight: FontWeight.w800))),
+              ],
+              if (error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(error!, style: TextStyle(fontSize: 12, color: sheet.p.danger, fontWeight: FontWeight.w700))),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                icon: busy ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : Icon(codeSent ? Icons.verified_rounded : Icons.mark_email_read_outlined, size: 18),
+                label: Text(codeSent ? tr('Kod bilan tasdiqlash') : tr('Emailga kod yuborish')),
+                onPressed: busy ? null : () async {
+                  if (!codeSent && fresh.text != repeat.text) {
+                    setSheet(() => error = tr('Parollar mos kelmadi'));
+                    return;
+                  }
+                  setSheet(() { busy = true; error = null; });
+                  try {
+                    final r = await Api.instance.post('/api/courier/password', {
+                      'oldPassword': old.text,
+                      'newPassword': fresh.text,
+                      if (codeSent) 'code': code.text,
+                    });
+                    if (!sheet.mounted) return;
+                    if (!codeSent) {
+                      setSheet(() { codeSent = true; devCode = r['devCode']?.toString(); });
+                    } else {
+                      Navigator.of(sheet).pop();
+                      if (context.mounted) showToast(context, tr("Parol email kodi bilan o'zgartirildi"));
+                    }
+                  } catch (e) {
+                    if (sheet.mounted) setSheet(() => error = _errText(e));
+                  } finally {
+                    if (sheet.mounted) setSheet(() => busy = false);
+                  }
+                },
+              ),
+            ]),
+          ),
+        ),
+      ),
+    ).whenComplete(() { old.dispose(); fresh.dispose(); repeat.dispose(); code.dispose(); });
   }
 
   // Tahrirlashdan keyin profil darhol yangilanishi uchun AppState tinglanadi
@@ -1778,10 +1868,13 @@ class CourierProfileTab extends StatelessWidget {
               ]),
             ),
             const SizedBox(height: 12),
+            _ServiceProfileCard(c),
+            const SizedBox(height: 12),
             Container(
               decoration: BoxDecoration(color: p.card, borderRadius: BorderRadius.circular(20), boxShadow: softShadow(context), border: context.isDark ? Border.all(color: p.border) : null),
               // Oq kartochka ichida ListTile bosilish effekti ko'rinishi uchun alohida Material qatlami
               child: Material(type: MaterialType.transparency, child: Column(children: [
+                ListTile(leading: Icon(Icons.verified_user_outlined, color: p.accentText), title: Text(tr('Xavfsizlik'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)), subtitle: Text(tr("Parol email kodi bilan himoyalangan"), style: TextStyle(fontSize: 12, color: p.muted)), trailing: Icon(Icons.chevron_right_rounded, color: p.muted), onTap: () => _password(context)),
                 ListTile(leading: Icon(Icons.translate_rounded, color: p.accentText), title: Text(tr('Til'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)), subtitle: Text('${L10n.flags[L10n.lang]} ${L10n.names[L10n.lang]}', style: TextStyle(fontSize: 12, color: p.muted)), trailing: Icon(Icons.chevron_right_rounded, color: p.muted), onTap: () => showLangSheet(context)),
                 ListTile(leading: Icon(Icons.storefront_outlined, color: p.accentText), title: Text(tr('Xaridor rejimi'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)), trailing: Icon(Icons.chevron_right_rounded, color: p.muted), onTap: onExit),
                 ListTile(
@@ -1801,6 +1894,40 @@ class CourierProfileTab extends StatelessWidget {
             ),
           ]),
         ),
+      ]),
+    );
+  }
+}
+
+/// Kuryer yoki yuk tashuvchining mijoz ko'radigan ish pasporti.
+class _ServiceProfileCard extends StatelessWidget {
+  final Courier c;
+  const _ServiceProfileCard(this.c);
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    final rows = <(IconData, String, String)>[
+      (c.isCargo ? Icons.local_shipping_outlined : providerIcon(c), tr('Transport'), c.isCargo ? cargoVehicleName(c.vehicleType) : vehicleName(c.vehicle)),
+      if (c.plate.isNotEmpty) (Icons.pin_outlined, tr('Davlat raqami'), c.plate),
+      if (c.isCargo && c.capacityKg > 0) (Icons.inventory_2_outlined, tr("Sig'im"), '${c.capacityKg} kg'),
+      (Icons.route_outlined, tr('Xizmat hududi'), c.isCargo ? (c.regions.isEmpty ? tr("Ko'rsatilmagan") : c.regions.join(' · ')) : (c.region.isEmpty ? tr("Ko'rsatilmagan") : c.region)),
+    ];
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+      decoration: BoxDecoration(color: p.card, borderRadius: BorderRadius.circular(20), boxShadow: softShadow(context), border: context.isDark ? Border.all(color: p.border) : null),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [Icon(Icons.badge_outlined, size: 19, color: p.accentText), const SizedBox(width: 8), Text(tr('Xizmat profili'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800))]),
+        const SizedBox(height: 7),
+        for (final r in rows)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 7),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(r.$1, size: 18, color: p.muted), const SizedBox(width: 10),
+              SizedBox(width: 98, child: Text(r.$2, style: TextStyle(fontSize: 12, color: p.muted, fontWeight: FontWeight.w700))),
+              Expanded(child: Text(r.$3, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700))),
+            ]),
+          ),
       ]),
     );
   }

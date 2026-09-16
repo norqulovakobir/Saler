@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { q, one, all } from './db.js';
 import { ah, HttpError, newId, hashPassword, checkPassword, storeDataUri, distanceKm, num, str, REGIONS, log, regionRouteKm, tariffPrice, median } from './util.js';
 import { emit, notifyShop } from './events.js';
-import { sendCode, checkCode, consumeCode, personName, needPhone, needEmail, needLogin, needPassword } from './verify.js';
+import { sendCode, checkCode, consumeCode, personName, needPhone, needEmail, needLogin, needPassword, ensureEmailAvailable, claimEmail, releaseEmail } from './verify.js';
 import { courierInsights } from './ai.js';
 
 const r = Router();
@@ -122,9 +122,7 @@ async function courierSignup(b) {
   }
   if (b.photo && !/^data:image\//.test(String(b.photo))) throw new HttpError(400, "Rasm bo'lishi kerak", { field: 'photo' });
   if (await one('SELECT 1 FROM couriers WHERE login=$1', [d.login])) throw new HttpError(409, 'Bu login band. Boshqasini tanlang', { field: 'login' });
-  if (await one('SELECT 1 FROM couriers WHERE lower(email)=$1 AND type=$2', [d.email, type])) {
-    throw new HttpError(409, "Bu email bilan hisob ochilgan. Kirish bo'limidan foydalaning", { field: 'email' });
-  }
+  await ensureEmailAvailable(d.email, { type });
   return d;
 }
 
@@ -132,17 +130,22 @@ async function courierSignup(b) {
 r.post('/register', ah(async (req, res) => {
   const b = req.body || {};
   const d = await courierSignup(b);
-  if (!str(b.code).trim()) return res.json(await sendCode({ email: d.email, purpose: d.type, name: d.firstName }));
-  await checkCode({ email: d.email, purpose: d.type, code: b.code });
+  const binding = `${d.type}:${d.login}`;
+  if (!str(b.code).trim()) return res.json(await sendCode({ email: d.email, purpose: d.type, name: d.firstName, binding }));
+  await checkCode({ email: d.email, purpose: d.type, code: b.code, binding });
   const photo = b.photo ? await storeDataUri(b.photo) : null;
   const id = newId('c_');
+  let emailClaimed = false;
   try {
+    await claimEmail(d.email, d.type, id);
+    emailClaimed = true;
     await q(`INSERT INTO couriers(id, type, name, first_name, last_name, phone, email, email_verified_at, login, pass_hash, photo, vehicle, vehicle_type,
         plate, capacity_kg, regions, region, price_per_km, base_price, last_login_at)
       VALUES($1,$2,$3,$4,$5,$6,$7,now(),$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,now())`,
     [id, d.type, `${d.firstName} ${d.lastName}`, d.firstName, d.lastName, d.phone, d.email, d.login, hashPassword(d.password), photo,
       d.vehicle, d.vehicleType, d.plate, d.capacityKg, JSON.stringify(d.regions), d.region, d.pricePerKm, d.basePrice]);
   } catch (e) {
+    if (emailClaimed) await releaseEmail(d.email, d.type, id).catch(() => {});
     if (e.code === '23505') throw new HttpError(409, 'Bu login band. Boshqasini tanlang', { field: 'login' });
     throw e;
   }
@@ -153,12 +156,11 @@ r.post('/register', ah(async (req, res) => {
 }));
 
 r.post('/login', ah(async (req, res) => {
-  const who = str(req.body?.login).trim().toLowerCase();
+  const login = needLogin(req.body?.login);
+  const email = needEmail(req.body?.email);
   const type = ['courier', 'cargo'].includes(req.body?.type) ? req.body.type : null;
-  const c = who.includes('@')
-    ? await one('SELECT * FROM couriers WHERE lower(email)=$1 AND ($2::text IS NULL OR type=$2) ORDER BY created_at DESC LIMIT 1', [who, type])
-    : await one('SELECT * FROM couriers WHERE login=$1', [who]);
-  if (!c || !checkPassword(str(req.body?.password), c.pass_hash)) throw new HttpError(403, "Login yoki parol noto'g'ri");
+  const c = await one('SELECT * FROM couriers WHERE login=$1 AND lower(email)=$2', [login, email]);
+  if (!c || !checkPassword(str(req.body?.password), c.pass_hash)) throw new HttpError(403, "Login, email yoki parol noto'g'ri");
   if (type && c.type !== type) {
     throw new HttpError(403, c.type === 'cargo' ? "Bu yuk tashuvchi hisobi. \"Yuk tashuvchi\" bo'limidan kiring" : "Bu kuryer hisobi. \"Kuryer\" bo'limidan kiring");
   }
@@ -166,6 +168,23 @@ r.post('/login', ah(async (req, res) => {
   await q('UPDATE sessions SET courier_id=$2, shop_id=NULL WHERE token=$1', [req.session.token, c.id]);
   await q('UPDATE couriers SET last_login_at=now() WHERE id=$1', [c.id]);
   res.json({ courier: serializeCourier(c) });
+}));
+
+// Kuryer/yuk tashuvchi parolini faqat joriy parol va o'z profilining email kodi bilan almashtiradi.
+r.post('/password', ah(async (req, res) => {
+  const c = needCourier(req);
+  const { oldPassword, newPassword, code } = req.body || {};
+  if (!checkPassword(str(oldPassword), c.pass_hash)) throw new HttpError(400, "Joriy parol noto'g'ri");
+  const password = needPassword(newPassword);
+  const email = needEmail(c.email);
+  const binding = `password:${c.type}:${c.id}`;
+  if (!str(code).trim()) return res.json(await sendCode({ email, purpose: 'password', name: c.first_name || c.name, binding }));
+  await checkCode({ email, purpose: 'password', code, binding });
+  await q('UPDATE couriers SET pass_hash=$2 WHERE id=$1', [c.id, hashPassword(password)]);
+  await q('UPDATE sessions SET courier_id=NULL WHERE courier_id=$1 AND token<>$2', [c.id, req.session.token]);
+  await consumeCode(email, 'password');
+  emit([`courier:${c.id}`], 'security:password', { changed: true });
+  res.json({ ok: true });
 }));
 
 r.post('/logout', ah(async (req, res) => {
@@ -198,7 +217,9 @@ r.put('/profile', ah(async (req, res) => {
   if (b.photo != null) set('photo', await storeDataUri(b.photo));
   if (b.name != null) { const n = str(b.name).trim(); if (!n) throw new HttpError(400, 'Ism bo\'sh'); set('name', n); }
   if (b.phone != null) set('phone', str(b.phone).trim());
-  if (b.email != null) set('email', str(b.email).trim());
+  if (b.email != null && needEmail(b.email) !== needEmail(c.email)) {
+    throw new HttpError(400, "Email xavfsizlik uchun profil orqali o'zgartirilmaydi. Yordam xizmatiga murojaat qiling", { field: 'email' });
+  }
   if (b.about != null) set('about', str(b.about).trim());
   if (b.vehicle != null && VEHICLES.includes(b.vehicle)) set('vehicle', b.vehicle);
   // Tarif: kuryer uchun ham, yuk tashuvchi uchun ham

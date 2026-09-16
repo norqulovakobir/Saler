@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { q, one, all } from './db.js';
 import { ah, HttpError, newId, newToken, hashPassword, checkPassword, storeDataUri, distanceKm, shopLevel, shopRating, num, str, log, nameKey, dataUriHash, normPhone, REGIONS } from './util.js';
-import { sendCode, checkCode, consumeCode, personName, needPhone, needEmail, needLogin, needPassword, needTelegram } from './verify.js';
+import { sendCode, checkCode, consumeCode, personName, needPhone, needEmail, needLogin, needPassword, needTelegram, ensureEmailAvailable, claimEmail, releaseEmail } from './verify.js';
 import { assistantReply, shopChatReply, sellerAdvice, sellerAiSummary, userInterests } from './ai.js';
 import { emit, notifyShop, sseHandler, clientInfo, placeName } from './events.js';
 import courierRouter, { serializeCourier, assignCourier, routeKmOf } from './courier.js';
@@ -107,17 +107,20 @@ r.post('/auth/buyer', ah(async (req, res) => {
   const email = needEmail(b.email);
   // Shu email bilan hisob bo'lsa (boshqa qurilma), sessiya o'sha hisobga o'tadi
   const existing = await one('SELECT * FROM users WHERE lower(email)=$1', [email]);
+  await ensureEmailAvailable(email, { type: 'buyer', accountId: existing?.id });
   if (existing?.blocked) throw new HttpError(403, "Bu hisob bloklangan. Qo'llab-quvvatlash xizmatiga murojaat qiling");
   const targetId = existing ? existing.id : !req.user.registered_at ? req.user.id : null;
   const phoneOwner = await one('SELECT id, email_verified_at FROM users WHERE phone=$1 AND ($2::int IS NULL OR id<>$2)', [phone, targetId]);
   if (phoneOwner?.email_verified_at) throw new HttpError(409, "Bu telefon raqami boshqa email bilan tasdiqlangan. O'sha emailni kiriting", { field: 'phone' });
 
-  if (!str(b.code).trim()) return res.json(await sendCode({ email, purpose: 'buyer', name: firstName }));
+  const binding = `buyer:${phone}`;
+  if (!str(b.code).trim()) return res.json(await sendCode({ email, purpose: 'buyer', name: firstName, binding }));
 
-  await checkCode({ email, purpose: 'buyer', code: b.code });
+  await checkCode({ email, purpose: 'buyer', code: b.code, binding });
   // Eski tasdiqlanmagan hisobdagi raqam bo'shatiladi
   if (phoneOwner) await q('UPDATE users SET phone=NULL WHERE id=$1', [phoneOwner.id]);
   const target = targetId != null ? { id: targetId } : await one('INSERT INTO users(name) VALUES($1) RETURNING id', [firstName]);
+  await claimEmail(email, 'buyer', target.id);
   const u = await one(`UPDATE users SET name=$2, first_name=$3, last_name=$4, phone=$5, email=$6, telegram=$7,
       email_verified_at=now(), registered_at=coalesce(registered_at, now()) WHERE id=$1 RETURNING *`,
   [target.id, `${firstName} ${lastName}`, firstName, lastName, phone, email, telegram]);
@@ -136,19 +139,23 @@ r.post('/auth/logout', ah(async (req, res) => {
 // ---------- parolni tiklash (sotuvchi, kuryer, yuk tashuvchi): email kod bilan ----------
 r.post('/auth/reset', ah(async (req, res) => {
   const b = req.body || {};
-  const role = ['seller', 'courier'].includes(b.role) ? b.role : null;
+  const role = ['seller', 'courier', 'cargo'].includes(b.role) ? b.role : null;
   if (!role) throw new HttpError(400, "Rolni tanlang");
+  const login = needLogin(b.login);
   const email = needEmail(b.email);
   const table = role === 'seller' ? 'shops' : 'couriers';
-  const acc = await one(`SELECT id, login, first_name, name, active FROM ${table} WHERE lower(email)=$1 AND email_verified_at IS NOT NULL ORDER BY created_at DESC LIMIT 1`, [email]);
+  const acc = role === 'seller'
+    ? await one('SELECT id, login, first_name, name, active FROM shops WHERE login=$1 AND lower(email)=$2 AND email_verified_at IS NOT NULL', [login, email])
+    : await one('SELECT id, login, first_name, name, active FROM couriers WHERE login=$1 AND lower(email)=$2 AND type=$3 AND email_verified_at IS NOT NULL', [login, email, role]);
+  const binding = `reset:${role}:${acc?.id ?? login}`;
   if (!str(b.code).trim()) {
     // Hisob bor-yo'qligini oshkor qilmaslik uchun javob bir xil
     if (!acc) return res.json({ codeSent: true, email, expiresIn: 600, resendIn: 60 });
-    return res.json(await sendCode({ email, purpose: 'reset', name: acc.first_name || acc.name }));
+    return res.json(await sendCode({ email, purpose: 'reset', name: acc.first_name || acc.name, binding }));
   }
   const password = needPassword(b.password);
   if (!acc) throw new HttpError(400, "Kod noto'g'ri", { codeInvalid: true });
-  await checkCode({ email, purpose: 'reset', code: b.code });
+  await checkCode({ email, purpose: 'reset', code: b.code, binding });
   await q(`UPDATE ${table} SET pass_hash=$2 WHERE id=$1`, [acc.id, hashPassword(password)]);
   // Boshqa qurilmalardagi sessiyalar yopiladi
   await q(`UPDATE sessions SET ${role === 'seller' ? 'shop_id' : 'courier_id'}=NULL WHERE ${role === 'seller' ? 'shop_id' : 'courier_id'}=$1 AND token<>$2`, [acc.id, req.session.token]);
@@ -203,7 +210,7 @@ async function sellerSignup(b) {
   d.location = { lat, lon, address: str(l.address).trim().slice(0, 200) };
   if (!d.location.address) throw new HttpError(400, "Do'kon manzilini kiriting", { field: 'address' });
   if (await one('SELECT 1 FROM shops WHERE login=$1', [d.login])) throw new HttpError(409, 'Bu login band. Boshqasini tanlang', { field: 'login' });
-  if (await one('SELECT 1 FROM shops WHERE lower(email)=$1', [d.email])) throw new HttpError(409, "Bu email bilan do'kon ochilgan. Kirish bo'limidan foydalaning", { field: 'email' });
+  await ensureEmailAvailable(d.email, { type: 'seller' });
   return d;
 }
 
@@ -211,15 +218,20 @@ async function sellerSignup(b) {
 r.post('/seller/register', ah(async (req, res) => {
   const b = req.body || {};
   const d = await sellerSignup(b);
-  if (!str(b.code).trim()) return res.json(await sendCode({ email: d.email, purpose: 'seller', name: d.firstName }));
-  await checkCode({ email: d.email, purpose: 'seller', code: b.code });
+  const binding = `seller:${d.login}`;
+  if (!str(b.code).trim()) return res.json(await sendCode({ email: d.email, purpose: 'seller', name: d.firstName, binding }));
+  await checkCode({ email: d.email, purpose: 'seller', code: b.code, binding });
   const logo = b.logo ? await storeDataUri(b.logo) : null;
   const id = newId('s_');
+  let emailClaimed = false;
   try {
+    await claimEmail(d.email, 'seller', id);
+    emailClaimed = true;
     await q(`INSERT INTO shops(id, name, seller_name, owner_name, first_name, last_name, phone, email, email_verified_at, region, login, pass_hash, logo, lat, lon, address, last_login_at)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,now(),$9,$10,$11,$12,$13,$14,$15,now())`,
     [id, d.shopName, d.aiName, `${d.firstName} ${d.lastName}`, d.firstName, d.lastName, d.phone, d.email, d.region, d.login, hashPassword(d.password), logo, d.location.lat, d.location.lon, d.location.address]);
   } catch (e) {
+    if (emailClaimed) await releaseEmail(d.email, 'seller', id).catch(() => {});
     if (e.code === '23505') throw new HttpError(409, 'Bu login band. Boshqasini tanlang', { field: 'login' });
     throw e;
   }
@@ -231,11 +243,10 @@ r.post('/seller/register', ah(async (req, res) => {
 }));
 
 r.post('/seller/login', ah(async (req, res) => {
-  const who = str(req.body?.login).trim().toLowerCase();
-  const s = who.includes('@')
-    ? await one('SELECT * FROM shops WHERE lower(email)=$1 ORDER BY created_at DESC LIMIT 1', [who])
-    : await one('SELECT * FROM shops WHERE login=$1', [who]);
-  if (!s || !checkPassword(str(req.body?.password), s.pass_hash)) throw new HttpError(403, "Login yoki parol noto'g'ri");
+  const login = needLogin(req.body?.login);
+  const email = needEmail(req.body?.email);
+  const s = await one('SELECT * FROM shops WHERE login=$1 AND lower(email)=$2', [login, email]);
+  if (!s || !checkPassword(str(req.body?.password), s.pass_hash)) throw new HttpError(403, "Login, email yoki parol noto'g'ri");
   if (!s.active) throw new HttpError(403, "Do'koningiz bloklangan. Qo'llab-quvvatlash xizmatiga murojaat qiling");
   await q('UPDATE sessions SET shop_id=$2, courier_id=NULL WHERE token=$1', [req.session.token, s.id]);
   await q('UPDATE shops SET last_login_at=now() WHERE id=$1', [s.id]);
@@ -252,12 +263,20 @@ const needShop = (req) => { if (!req.shop) throw new HttpError(403, 'Sotuvchi si
 
 r.post('/seller/password', ah(async (req, res) => {
   const shop = needShop(req);
-  const { oldPassword, newPassword } = req.body || {};
+  const { oldPassword, newPassword, code } = req.body || {};
   if (!checkPassword(str(oldPassword), shop.pass_hash)) throw new HttpError(400, "Joriy parol noto'g'ri");
-  if (str(newPassword).length < 6) throw new HttpError(400, 'Yangi parol kamida 6 belgi');
-  await q('UPDATE shops SET pass_hash=$2 WHERE id=$1', [shop.id, hashPassword(newPassword)]);
+  const password = needPassword(newPassword);
+  const email = needEmail(shop.email);
+  // Ikki bosqich: avval joriy parol tekshiriladi va emailga kod jo'natiladi,
+  // keyin kod bilan tasdiqlangandagina yangi parol saqlanadi.
+  if (!str(code).trim()) {
+    return res.json(await sendCode({ email, purpose: 'password', name: shop.first_name || shop.owner_name || shop.name, binding: `password:seller:${shop.id}` }));
+  }
+  await checkCode({ email, purpose: 'password', code, binding: `password:seller:${shop.id}` });
+  await q('UPDATE shops SET pass_hash=$2 WHERE id=$1', [shop.id, hashPassword(password)]);
+  await consumeCode(email, 'password');
   const who = clientInfo(req);
-  await notifyShop(shop.id, 'security', "Parol o'zgartirildi", `Do'kon paroli yangilandi.\nQurilma: ${who.device}\nIlova: ${who.app}${who.ip ? `\nIP: ${who.ip}` : ''}`, { device: who.device, app: who.app, ip: who.ip });
+  await notifyShop(shop.id, 'security', "Parol o'zgartirildi", `Do'kon paroli email kodi bilan yangilandi.\nQurilma: ${who.device}\nIlova: ${who.app}${who.ip ? `\nIP: ${who.ip}` : ''}`, { device: who.device, app: who.app, ip: who.ip });
   res.json({ ok: true });
 }));
 
@@ -414,6 +433,7 @@ r.post('/shops/:id/follow', ah(async (req, res) => {
   const f = await followInfo(s.id, req.user.id);
   if (ins) {
     await notifyShop(s.id, 'follow', 'Yangi obunachi', `${req.user.name || 'Xaridor'} do'koningizga obuna bo'ldi. Obunachilar: ${f.followers}`, { followers: f.followers });
+    dropAffinity(req.user.id);
     maybeRefreshInterests(req.user.id);
   }
   res.json(f);
@@ -428,6 +448,7 @@ r.post('/products/:id/like', ah(async (req, res) => {
   const p = await one('SELECT id FROM products WHERE id=$1', [req.params.id]);
   if (!p) throw new HttpError(404, 'Mahsulot topilmadi');
   await q('INSERT INTO product_likes(user_id, product_id) VALUES($1,$2) ON CONFLICT DO NOTHING', [req.user.id, p.id]);
+  dropAffinity(req.user.id);
   maybeRefreshInterests(req.user.id);
   res.json(await likeInfo(p.id, req.user.id));
 }));
@@ -454,9 +475,17 @@ async function collectSignals(uid) {
 }
 
 const interestJobs = new Set();
+// Har bir surishda bazaga so'rov yubormaslik uchun: bitta foydalanuvchi uchun 60 soniyada bir marta tekshiriladi
+const interestSeen = new Map();
 /** Qiziqishlar profilini fonda Gemini bilan yangilaydi: ko'pi bilan 20 daqiqada bir marta (force bo'lmasa) */
 function maybeRefreshInterests(userId, { force = false } = {}) {
   if (interestJobs.has(userId)) return;
+  if (!force) {
+    const last = interestSeen.get(userId) || 0;
+    if (Date.now() - last < 60e3) return;
+    interestSeen.set(userId, Date.now());
+    if (interestSeen.size > 5000) interestSeen.delete(interestSeen.keys().next().value);
+  }
   interestJobs.add(userId);
   (async () => {
     const u = await one('SELECT interests, interests_at FROM users WHERE id=$1', [userId]);
@@ -477,55 +506,200 @@ r.get('/me/interests', ah(async (req, res) => {
   res.json({ categories: i.categories || [], keywords: i.keywords || [], summary: i.summary || null, source: i.source || null, updatedAt: u?.interests_at || null });
 }));
 
+// ---------- Reels: qiziqishga asoslangan tartib ----------
+// Nomzodlar ro'yxati hamma uchun umumiy keshda turadi: har bir foydalanuvchi uchun bazaga og'ir so'rov ketmaydi.
+const POOL_TTL = 120e3;
+let poolCache = { at: 0, rows: [] };
+// Har bir foydalanuvchi/sessiya uchun faqat ko'rib bo'lingan kichik bo'laklar.
+// To'liq katalog bu yerda hech qachon RAM'ga olinmaydi.
+const reelLists = new Map();
+async function candidatePool() {
+  if (poolCache.rows.length && Date.now() - poolCache.at < POOL_TTL) return poolCache.rows;
+  const rows = await all(`
+    WITH likes AS (SELECT product_id, count(*)::int AS n FROM product_likes GROUP BY product_id),
+      sold AS (SELECT i->>'productId' AS pid, sum((i->>'qty')::int)::int AS n
+        FROM orders o CROSS JOIN LATERAL jsonb_array_elements(o.items) i
+        WHERE o.status='done' AND o.created_at > now() - interval '60 days' GROUP BY 1),
+      base AS (
+        SELECT p.id, p.shop_id, p.name, p.category, left(coalesce(p.description,''), 160) AS description,
+          p.views, p.created_at, coalesce(l.n, 0) AS likes, coalesce(s2.n, 0) AS sold
+        FROM products p
+        JOIN shops s ON s.id = p.shop_id
+        LEFT JOIN likes l ON l.product_id = p.id
+        LEFT JOIN sold s2 ON s2.pid = p.id
+        WHERE p.active AND s.active AND jsonb_array_length(p.photos) > 0
+      ),
+      fresh AS (SELECT * FROM base ORDER BY created_at DESC LIMIT 400),
+      top AS (SELECT * FROM base ORDER BY (views + likes * 5 + sold * 10) DESC LIMIT 200)
+    SELECT * FROM fresh UNION SELECT * FROM top`);
+  poolCache = { at: Date.now(), rows };
+  return rows;
+}
+/** Yangi mahsulot qo'shilsa yoki o'chirilsa nomzodlar keshi yangilanadi */
+export const dropReelPool = () => {
+  poolCache = { at: 0, rows: [] };
+  reelLists.clear();
+};
+
+const tokens = (s) => String(s || '').toLowerCase().normalize('NFKC').split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2 && !STOP_WORDS.has(w));
+
+// Foydalanuvchi yaqinligi (kategoriya va kalit so'zlar) 5 daqiqa keshlanadi
+const affinityCache = new Map();
+const AFFINITY_TTL = 5 * 60e3;
 /**
- * Reels tartibi: mashhurlik (ko'rish, layk, sotuv, yangilik) + qiziqishga moslik + obuna bo'lingan do'konlar
- * (yangi mahsulotlari 48 soat eng oldinda) − yaqinda ko'rilganlar + seed bo'yicha kichik tasodif.
+ * Harakatlardan qiziqish profili: layk, buyurtma, Reels'da uzoq ko'rish, mahsulot ko'rish.
+ * Har bir signal vaqt o'tishi bilan so'nadi (yarim umr ~14 kun), shuning uchun qiziqish o'zgarsa tartib ham o'zgaradi.
  */
-async function rankReels(req, seed) {
+async function userAffinity(uid) {
+  const c = affinityCache.get(uid);
+  if (c && c.exp > Date.now()) return c.data;
+  const decay = "exp(-extract(epoch from now() - %s) / 1209600.0)";
+  const [cats, names, follows, me] = await Promise.all([
+    all(`SELECT category, sum(w)::float8 AS score FROM (
+        SELECT p.category, 5.0 * ${decay.replace('%s', 'l.created_at')} AS w
+          FROM product_likes l JOIN products p ON p.id=l.product_id WHERE l.user_id=$1
+        UNION ALL
+        SELECT p.category, least(6.0, e.dwell_ms / 1500.0) * ${decay.replace('%s', 'e.created_at')}
+          FROM reel_events e JOIN products p ON p.id=e.product_id
+          WHERE e.user_id=$1 AND e.created_at > now() - interval '45 days'
+        UNION ALL
+        SELECT p.category, 8.0 * ${decay.replace('%s', 'o.created_at')}
+          FROM orders o CROSS JOIN LATERAL jsonb_array_elements(o.items) i JOIN products p ON p.id = i->>'productId'
+          WHERE o.user_id=$1
+        UNION ALL
+        SELECT p.category, 1.5 * ${decay.replace('%s', 'v.created_at')}
+          FROM product_views v JOIN products p ON p.id=v.product_id WHERE v.user_id=$1
+      ) t WHERE t.category IS NOT NULL AND t.category <> '' GROUP BY 1 ORDER BY 2 DESC LIMIT 12`, [uid]),
+    all(`(SELECT p.name FROM product_likes l JOIN products p ON p.id=l.product_id WHERE l.user_id=$1 ORDER BY l.created_at DESC LIMIT 15)
+      UNION ALL
+      (SELECT p.name FROM reel_events e JOIN products p ON p.id=e.product_id
+        WHERE e.user_id=$1 AND e.dwell_ms > 4000 ORDER BY e.created_at DESC LIMIT 15)`, [uid]),
+    all('SELECT shop_id FROM follows WHERE user_id=$1', [uid]),
+    one('SELECT interests FROM users WHERE id=$1', [uid]),
+  ]);
+  // Kalit so'zlar: layk qilingan va uzoq ko'rilgan mahsulot nomlaridan + AI profilidan
+  const freq = new Map();
+  for (const r2 of names) for (const w of tokens(r2.name)) freq.set(w, (freq.get(w) || 0) + 1);
+  for (const w of (me?.interests?.keywords || [])) freq.set(String(w).toLowerCase(), (freq.get(String(w).toLowerCase()) || 0) + 2);
+  const keywords = [...freq.entries()].filter(([, n]) => n >= 1).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([w]) => w);
+  // AI aniqlagan kategoriyalar ham qo'shiladi (harakat kam bo'lgan yangi foydalanuvchi uchun)
+  const score = new Map(cats.map((x) => [x.category, Number(x.score)]));
+  (me?.interests?.categories || []).forEach((cat, i) => score.set(cat, (score.get(cat) || 0) + (4 - Math.min(i, 3))));
+  const max = Math.max(1, ...score.values());
+  const data = {
+    cats: Object.fromEntries([...score.entries()].map(([k, v]) => [k, v / max])), // 0..1
+    keywords,
+    follows: new Set(follows.map((f) => f.shop_id)),
+    strength: Math.min(1, max / 12), // profil qanchalik to'lgani: yangi foydalanuvchida 0 ga yaqin
+  };
+  affinityCache.set(uid, { data, exp: Date.now() + AFFINITY_TTL });
+  if (affinityCache.size > 2000) affinityCache.delete(affinityCache.keys().next().value);
+  return data;
+}
+export const dropAffinity = (uid) => affinityCache.delete(uid);
+
+/**
+ * Bitta kichik Reel bo'lagini tanlaydi. Avvalgi yechim 400–800 mahsulotni
+ * olib, Node xotirasida saralardi. Bu so'rov esa aynan kerak bo'lgan 5 yoki
+ * 2 ta ID'ni SQL ichida qiziqish bo'yicha saralaydi.
+ */
+async function fetchReelBatch(req, seed, excluded, take) {
   const uid = req.user.id;
-  const rows = await all(`SELECT p.id, p.shop_id, p.name, p.category, p.description, p.views, p.created_at,
-      (SELECT count(*) FROM product_likes l WHERE l.product_id=p.id)::int AS likes,
-      EXISTS(SELECT 1 FROM follows f WHERE f.shop_id=p.shop_id AND f.user_id=$1) AS following,
-      (SELECT count(*) FROM reel_events e WHERE e.product_id=p.id AND e.user_id=$1 AND e.created_at > now() - interval '3 days')::int AS seen,
-      (SELECT coalesce(sum((i->>'qty')::int),0) FROM orders o CROSS JOIN LATERAL jsonb_array_elements(o.items) i
-        WHERE o.shop_id=p.shop_id AND o.status='done' AND i->>'productId'=p.id)::int AS sold
-    FROM products p JOIN shops s ON s.id=p.shop_id
+  const affinity = await userAffinity(uid);
+  const categories = Object.entries(affinity.cats)
+    .filter(([, score]) => Number(score) >= .12)
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+    .map(([category]) => category)
+    .slice(0, 8);
+  const patterns = affinity.keywords
+    .map((word) => String(word).trim().toLowerCase())
+    .filter((word) => word.length >= 3)
+    .slice(0, 12)
+    .map((word) => `%${word}%`);
+  const hasInterest = categories.length > 0 || patterns.length > 0;
+  const count = Math.max(1, Math.min(5, take));
+
+  const find = async (strictInterest) => all(`
+    SELECT p.id,
+      CASE
+        WHEN $5::boolean THEN 'interest'
+        WHEN EXISTS(SELECT 1 FROM follows f WHERE f.user_id=$1 AND f.shop_id=p.shop_id)
+          AND p.created_at > now() - interval '48 hours' THEN 'following'
+        WHEN p.created_at > now() - interval '48 hours' THEN 'new'
+        ELSE 'popular'
+      END AS reason
+    FROM products p
+    JOIN shops s ON s.id=p.shop_id
     WHERE p.active AND s.active AND jsonb_array_length(p.photos) > 0
-    ORDER BY p.created_at DESC LIMIT 800`, [uid]);
-  const me = await one('SELECT interests FROM users WHERE id=$1', [uid]);
-  const cats = me?.interests?.categories || [], kws = me?.interests?.keywords || [];
-  const now = Date.now();
-  const jitter = (text) => { let h = 2166136261; for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619); } return ((h >>> 0) % 100000) / 100000; };
-  return rows.map((p) => {
-    const ageH = (now - new Date(p.created_at).getTime()) / 3600e3;
-    const popular = Math.log1p(p.views) + 2 * Math.log1p(p.likes) + 3 * Math.log1p(p.sold) + 3 * Math.exp(-ageH / 72);
-    const ci = cats.indexOf(p.category);
-    const text = `${p.name} ${p.description || ''}`.toLowerCase();
-    const interest = (ci >= 0 ? 5 - Math.min(ci, 3) : 0) + Math.min(kws.filter((k) => text.includes(k)).length, 2) * 2;
-    const follow = p.following ? (ageH < 48 ? 14 : 4) : 0;
-    const own = req.shop && req.shop.id === p.shop_id ? -4 : 0;
-    const score = popular + interest + follow + own - 6 * Math.min(p.seen, 2) + jitter(`${seed}:${p.id}`) * 2.5;
-    const reason = p.following && ageH < 48 ? 'following' : interest > 0 ? 'interest' : p.following ? 'following' : 'popular';
-    return { id: p.id, score, reason };
-  }).sort((a, b) => b.score - a.score);
+      AND (cardinality($2::text[]) = 0 OR p.id <> ALL($2::text[]))
+      AND (
+        NOT $5::boolean
+        OR p.category = ANY($3::text[])
+        OR lower(concat_ws(' ', p.name, coalesce(p.description, ''))) LIKE ANY($4::text[])
+      )
+    ORDER BY
+      (
+        CASE WHEN p.category = ANY($3::text[])
+          THEN greatest(4, 22 - 3 * coalesce(array_position($3::text[], p.category), 7))
+          ELSE 0 END
+        + CASE WHEN lower(concat_ws(' ', p.name, coalesce(p.description, ''))) LIKE ANY($4::text[]) THEN 9 ELSE 0 END
+        + CASE WHEN EXISTS(SELECT 1 FROM follows f WHERE f.user_id=$1 AND f.shop_id=p.shop_id) THEN 4 ELSE 0 END
+        + least(6, ln(1 + greatest(0, p.views)::float8))
+        + CASE WHEN p.created_at > now() - interval '72 hours' THEN 2 ELSE 0 END
+        - CASE WHEN EXISTS(
+          SELECT 1 FROM reel_events e
+          WHERE e.user_id=$1 AND e.product_id=p.id AND e.created_at > now() - interval '24 hours'
+        ) THEN 30 ELSE 0 END
+      ) DESC,
+      md5($6::text || p.id) ASC
+    LIMIT $7`, [uid, excluded, categories, patterns, strictInterest, seed, count]);
+
+  // Yangi foydalanuvchi qiziqishi hali aniqlanmagan bo'lsa, faqat boshlang'ich
+  // 5 ta mashhur mahsulot ko'rsatiladi. Birinchi qarash/layklardan keyin
+  // keyingi so'rovlar faqat qiziqishga mos mahsulotlardan tuziladi.
+  let rows = await find(hasInterest);
+  if (hasInterest && rows.length === 0) rows = await find(false);
+  return rows.map((row) => ({ id: row.id, reason: row.reason }));
 }
 
-const reelLists = new Map(); // `${userId}:${seed}` -> { ranked, exp }: sahifalar orasida tartib o'zgarmasligi uchun
-r.get('/reels', ah(async (req, res) => {
-  const uid = req.user.id;
-  const limit = Math.min(20, Math.max(1, Math.floor(num(req.query.limit, 8))));
-  const offset = Math.max(0, Math.floor(num(req.query.offset, 0)));
-  const seed = str(req.query.seed).slice(0, 64) || newToken().slice(0, 12);
-  const key = `${uid}:${seed}`;
+async function reelPage(req, seed, offset, limit) {
+  const key = `${req.user.id}:${seed}`;
   let list = reelLists.get(key);
   if (!list || list.exp < Date.now()) {
-    list = { ranked: await rankReels(req, seed), exp: Date.now() + 30 * 60e3 };
+    list = { ranked: [], pages: new Map(), exhausted: false, exp: Date.now() + 30 * 60e3 };
     reelLists.set(key, list);
-    for (const [k, v] of reelLists) if (v.exp < Date.now()) reelLists.delete(k);
-    if (reelLists.size > 1000) reelLists.delete(reelLists.keys().next().value);
-    if (offset === 0) maybeRefreshInterests(uid);
   }
-  const page = list.ranked.slice(offset, offset + limit);
+  list.exp = Date.now() + 30 * 60e3;
+  const pageKey = `${offset}:${limit}`;
+  if (!list.pages.has(pageKey)) {
+    const wanted = offset + limit;
+    while (!list.exhausted && list.ranked.length < wanted) {
+      const missing = wanted - list.ranked.length;
+      const batch = await fetchReelBatch(req, seed, list.ranked.map((x) => x.id), missing);
+      if (!batch.length) {
+        list.exhausted = true;
+        break;
+      }
+      list.ranked.push(...batch);
+      if (batch.length < missing) list.exhausted = true;
+    }
+    list.pages.set(pageKey, list.ranked.slice(offset, offset + limit));
+  }
+  const page = list.pages.get(pageKey) || [];
+  return { page, hasMore: !list.exhausted || offset + page.length < list.ranked.length };
+}
+
+r.get('/reels', ah(async (req, res) => {
+  const uid = req.user.id;
+  // Ilova 5 ta bilan boshlaydi, keyin 2 tadan so'raydi. Limitni kichik
+  // ushlab turish birinchi kadr va keyingi swipe'larni silliq qiladi.
+  const limit = Math.min(5, Math.max(1, Math.floor(num(req.query.limit, 5))));
+  const offset = Math.max(0, Math.floor(num(req.query.offset, 0)));
+  const seed = str(req.query.seed).slice(0, 64) || newToken().slice(0, 12);
+  for (const [k, value] of reelLists) if (value.exp < Date.now()) reelLists.delete(k);
+  if (reelLists.size > 1000) reelLists.delete(reelLists.keys().next().value);
+  if (offset === 0) maybeRefreshInterests(uid);
+  const { page, hasMore } = await reelPage(req, seed, offset, limit);
   const ids = page.map((x) => x.id);
   // Layk va obuna holati har sahifada yangidan olinadi
   const prods = ids.length ? await all(`SELECT p.*, (SELECT count(*) FROM product_likes l WHERE l.product_id=p.id)::int AS likes,
@@ -542,7 +716,7 @@ r.get('/reels', ah(async (req, res) => {
       likes: p.likes, liked: p.liked, isNew: Date.now() - new Date(p.created_at).getTime() < 48 * 3600e3, reason: x.reason,
     };
   });
-  res.json({ items, hasMore: offset + limit < list.ranked.length, seed });
+  res.json({ items, hasMore, seed });
 }));
 
 r.post('/reels/:id/view', ah(async (req, res) => {
@@ -555,6 +729,9 @@ r.post('/reels/:id/view', ah(async (req, res) => {
     const ins = await one('INSERT INTO product_views(product_id, user_id, shop_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING id', [p.id, req.user.id, p.shop_id]);
     if (ins) await q('UPDATE products SET views=views+1 WHERE id=$1', [p.id]);
   }
+  // Keyingi kichik bo'lak aynan hozirgi ko'rish signalini hisobga olsin;
+  // 5 daqiqalik affinity keshi eski qiziqishni ushlab qolmaydi.
+  dropAffinity(req.user.id);
   maybeRefreshInterests(req.user.id);
   res.json({ ok: true });
 }));
@@ -584,6 +761,7 @@ r.post('/orders', ah(async (req, res) => {
   const mapUrl = b.lat != null && b.lon != null ? `https://www.google.com/maps?q=${b.lat},${b.lon}` : null;
   await notifyShop(shopId, 'order', 'Yangi buyurtma', `${customer}: ${productName} — ${price.toLocaleString('ru-RU')} so'm. Tel: ${str(b.phone)}`, { orderId: id, mapUrl, amount: price });
   emit([`shop:${shopId}`], 'order:new', { orderId: id, amount: price });
+  dropAffinity(req.user.id);
   maybeRefreshInterests(req.user.id);
   log('Yangi buyurtma', id, shopId, price);
   await assignCourier(id).catch((e) => log('assign xato', e.message));
@@ -722,6 +900,7 @@ r.post('/seller/products', ah(async (req, res) => {
   const id = newId('p_');
   await q('INSERT INTO products(id, shop_id, name, category, price, description, photos, name_key, photo_hashes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
     [id, shop.id, name, str(b.category) || null, price, str(b.description).trim(), JSON.stringify(photos), key, JSON.stringify(hashes)]);
+  dropReelPool();
   // Yangi mahsulot birinchi bo'lib obunachilarga: jonli hodisa va Reels'da oldinga chiqadi
   const fans = await all('SELECT user_id FROM follows WHERE shop_id=$1', [shop.id]);
   if (fans.length) emit(fans.map((f) => `user:${f.user_id}`), 'product:new', { productId: id, shopId: shop.id, shopName: shop.name, name });
@@ -753,12 +932,14 @@ r.put('/seller/products/:id', ah(async (req, res) => {
     set('photo_hashes', JSON.stringify({ ...kept, ...hashes }));
   }
   if (sets.length) await q(`UPDATE products SET ${sets.join(', ')} WHERE id=$1`, vals);
+  dropReelPool();
   res.json({ product: serializeProduct(await one('SELECT * FROM products WHERE id=$1', [p.id])) });
 }));
 
 r.delete('/seller/products/:id', ah(async (req, res) => {
   const shop = needShop(req);
   await q('DELETE FROM products WHERE id=$1 AND shop_id=$2', [req.params.id, shop.id]);
+  dropReelPool();
   res.json({ ok: true });
 }));
 
@@ -887,6 +1068,56 @@ async function buildAnalytics(shop) {
 
 r.get('/seller/analytics', ah(async (req, res) => res.json(await buildAnalytics(needShop(req)))));
 
+// Instagram-uslubidagi sotuvchi profili uchun auditoriya va post statistikasi.
+// Email/telefon kabi shaxsiy ma'lumotlar qaytarilmaydi — faqat obunachining
+// profil nomi va shu do'kondagi faolligi ko'rinadi.
+r.get('/seller/audience', ah(async (req, res) => {
+  const shop = needShop(req);
+  const sid = shop.id;
+  const limit = Math.min(100, Math.max(1, Math.floor(num(req.query.limit, 50))));
+  const [summary, followers, products] = await Promise.all([
+    one(`SELECT
+      (SELECT count(*) FROM follows WHERE shop_id=$1)::int AS followers,
+      (SELECT count(DISTINCT user_id) FROM product_views WHERE shop_id=$1)::int AS reach,
+      (SELECT count(*) FROM product_likes l JOIN products p ON p.id=l.product_id WHERE p.shop_id=$1)::int AS likes,
+      (SELECT count(*) FROM orders WHERE shop_id=$1 AND NOT archived)::int AS orders,
+      (SELECT coalesce(sum(price) FILTER (WHERE status='done'),0)::bigint FROM orders WHERE shop_id=$1 AND NOT archived) AS revenue,
+      (SELECT count(*) FROM follows f
+        WHERE f.shop_id=$1 AND (
+          EXISTS(SELECT 1 FROM product_views v WHERE v.user_id=f.user_id AND v.shop_id=$1)
+          OR EXISTS(SELECT 1 FROM product_likes l JOIN products p ON p.id=l.product_id WHERE l.user_id=f.user_id AND p.shop_id=$1)
+        ))::int AS "engagedFollowers"`, [sid]),
+    all(`SELECT u.id,
+        coalesce(nullif(trim(concat_ws(' ', u.first_name, u.last_name)), ''), nullif(u.name, ''), 'Xaridor') AS name,
+        f.created_at AS "joinedAt",
+        (SELECT count(*) FROM product_views v WHERE v.user_id=u.id AND v.shop_id=$1)::int AS views,
+        (SELECT count(*) FROM product_likes l JOIN products p ON p.id=l.product_id WHERE l.user_id=u.id AND p.shop_id=$1)::int AS likes,
+        (SELECT count(*) FROM orders o WHERE o.user_id=u.id AND o.shop_id=$1 AND NOT o.archived)::int AS orders,
+        (SELECT p.name FROM product_views v JOIN products p ON p.id=v.product_id
+          WHERE v.user_id=u.id AND v.shop_id=$1 ORDER BY v.created_at DESC LIMIT 1) AS "lastProduct"
+      FROM follows f JOIN users u ON u.id=f.user_id
+      WHERE f.shop_id=$1 ORDER BY f.created_at DESC LIMIT $2`, [sid, limit]),
+    all(`SELECT p.id, p.name, p.photos, p.active, p.created_at AS "createdAt",
+        (SELECT count(*) FROM product_views v WHERE v.product_id=p.id)::int AS views,
+        (SELECT count(*) FROM product_views v JOIN follows f ON f.user_id=v.user_id
+          WHERE v.product_id=p.id AND f.shop_id=$1)::int AS "followerViews",
+        (SELECT count(*) FROM product_likes l WHERE l.product_id=p.id)::int AS likes,
+        (SELECT coalesce(sum((i->>'qty')::int),0)::int
+          FROM orders o CROSS JOIN LATERAL jsonb_array_elements(o.items) i
+          WHERE o.shop_id=$1 AND NOT o.archived AND o.status='done' AND i->>'productId'=p.id) AS sold,
+        (SELECT coalesce(sum((i->>'qty')::bigint * (i->>'price')::bigint),0)::bigint
+          FROM orders o CROSS JOIN LATERAL jsonb_array_elements(o.items) i
+          WHERE o.shop_id=$1 AND NOT o.archived AND o.status='done' AND i->>'productId'=p.id) AS revenue
+      FROM products p WHERE p.shop_id=$1
+      ORDER BY views DESC, likes DESC, p.created_at DESC LIMIT 60`, [sid]),
+  ]);
+  res.json({
+    summary: { ...summary, revenue: Number(summary.revenue || 0) },
+    followers,
+    products: products.map((p) => ({ ...p, photo: p.photos?.[0] || null, revenue: Number(p.revenue || 0) })),
+  });
+}));
+
 /** Analitika bo'yicha AI xulosa (6 soat keshlanadi, ?refresh=1 yangilaydi) */
 r.get('/seller/analytics/ai-summary', ah(async (req, res) => {
   const shop = needShop(req);
@@ -996,6 +1227,6 @@ ${a.peakHour ? `<span>Eng faol soat: ${esc(a.peakHour.h)}:00</span>` : ''}${a.be
 </div>
 <div class="card"><h2>Oxirgi buyurtmalar</h2>${table(['Sana', 'Mijoz', 'Mahsulot', 'Summa', 'Holat'], a.recent, [(x) => new Date(x.createdAt || x.created_at).toLocaleDateString('ru-RU'), (x) => x.customerName || x.customer_name || '—', (x) => x.productName || x.product_name || '—', (x) => `${f(x.price)} so'm`, (x) => ({ new: 'Yangi', done: 'Bajarildi', cancelled: 'Bekor' }[x.status] || x.status)])}</div>
 <div class="card"><h2>Tavsiyalar</h2>${(a.tips || []).length ? `<ul style="margin:0;padding-left:18px;line-height:1.6">${a.tips.map((t) => `<li><b>${esc(t.title)}</b>: ${esc(t.text)}</li>`).join('')}</ul>` : `<p class="empty">Tavsiya yo'q</p>`}</div>
-<p class="muted" style="margin-top:18px">Saler AI tomonidan tayyorlandi.</p>
+<p class="muted" style="margin-top:18px">Rydex tomonidan tayyorlandi.</p>
 </div></body></html>`);
 });

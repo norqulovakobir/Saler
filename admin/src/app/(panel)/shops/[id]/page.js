@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Eye, EyeOff, MapPin, Package, Phone, ShoppingCart, Trash2, Wallet } from 'lucide-react';
+import { ArrowLeft, Ban, BadgeCheck, CheckCircle2, Eye, EyeOff, MapPin, Package, Phone, ShoppingCart, Trash2, Wallet } from 'lucide-react';
 import { Avatar, Badge, Card, ErrorBox, PageTitle, Stat, StatusBadge, Table, useConfirm } from '@/components/ui';
 import { AreaSeries } from '@/components/charts';
 import { useApi } from '@/lib/hooks';
@@ -20,6 +20,18 @@ export default function ShopDetail() {
   const toggleProduct = async (p) => { await api(`/products/${p.id}`, { method: 'PATCH', body: { active: !p.active } }); reload(); };
   const delProduct = async (p) => { if (await confirm({ title: "Mahsulotni o'chirish", text: `"${p.name}" butunlay o'chiriladi.`, danger: true, ok: "O'chirish" })) { await api(`/products/${p.id}`, { method: 'DELETE' }); reload(); } };
   const setStatus = async (o, status) => { await api(`/orders/${o.id}`, { method: 'PATCH', body: { status } }); reload(); };
+  const toggleShop = async () => {
+    const block = s.active;
+    const ok = await confirm({
+      title: block ? "Do'konni bloklash" : 'Blokdan chiqarish',
+      text: block ? `"${s.name}" sotuvchisi tizimga kira olmaydi, do'kon xaridorlarga ko'rinmaydi.` : `"${s.name}" qayta faollashtiriladi.`,
+      danger: block,
+      ok: block ? 'Bloklash' : 'Faollashtirish',
+    });
+    if (!ok) return;
+    setBusy(true);
+    try { await api(`/shops/${id}`, { method: 'PATCH', body: { active: !s.active } }); reload(); } finally { setBusy(false); }
+  };
   const delShop = async () => {
     if (!(await confirm({ title: "Do'konni o'chirish", text: `"${s.name}" do'koni, uning ${data.products.length} ta mahsuloti va ${data.stats.totalOrders} ta buyurtmasi butunlay o'chiriladi. Qaytarib bo'lmaydi.`, danger: true, ok: "Ha, o'chirish" }))) return;
     setBusy(true);
@@ -36,8 +48,22 @@ export default function ShopDetail() {
       <Link href="/shops" className="mb-3 inline-flex items-center gap-1 text-xs text-muted hover:text-text"><ArrowLeft size={12} />Do'konlar</Link>
       <PageTitle
         title={<span className="flex items-center gap-3"><Avatar src={photoUrl(s.logo)} name={s.name} size={40} rounded="rounded-xl" />{s.name}<span className="text-sm font-normal text-muted">@{s.login}</span></span>}
-        sub={`Egasi: ${s.ownerName} · AI nomi: ${s.sellerName || '—'} · Ochilgan: ${date(s.createdAt)}`}
-        action={<button className="btn btn-danger" disabled={busy} onClick={delShop}><Trash2 size={14} />Do'konni o'chirish</button>} />
+        sub={<span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span>Egasi: {[s.firstName, s.lastName].filter(Boolean).join(' ') || s.ownerName || '—'}</span>
+          <span>· AI sotuvchi: {s.aiName || 'Madina'}</span>
+          {s.region && <span>· {s.region}</span>}
+          <span>· {s.email || 'email yo\'q'}</span>
+          {s.emailVerified && <BadgeCheck size={13} className="text-emerald-500" />}
+          <span>· Ochilgan: {date(s.createdAt)}</span>
+          {s.lastLoginAt && <span>· Oxirgi kirish: {ago(s.lastLoginAt)}</span>}
+          {s.active === false && <Badge tone="rose">Bloklangan</Badge>}
+        </span>}
+        action={<>
+          <button className={`btn ${s.active === false ? 'btn-primary' : ''}`} disabled={busy} onClick={toggleShop}>
+            {s.active === false ? <><CheckCircle2 size={14} />Blokdan chiqarish</> : <><Ban size={14} />Bloklash</>}
+          </button>
+          <button className="btn btn-danger" disabled={busy} onClick={delShop}><Trash2 size={14} />Do'konni o'chirish</button>
+        </>} />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Stat label="Tushum" value={moneyShort(st.revenue)} icon={Wallet} />

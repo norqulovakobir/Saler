@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "saler-api",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-16",
+  "keep_vars": true,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true
+    }
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "saler-db",
+      "database_id": "97c4adfc-5bd0-435d-abe9-545f618893b5"
+    }
+  ],
+  "triggers": {
+    "crons": ["15 3 * * *"]
+  }
+}

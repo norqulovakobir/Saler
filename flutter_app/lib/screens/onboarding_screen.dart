@@ -74,7 +74,7 @@ class _LanguageStep extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 22),
-                    const Text('Saler AI', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -.6)),
+                    const Text('Rydex', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -.6)),
                     const SizedBox(height: 6),
                     // Uch tilda: foydalanuvchi hali tilni tanlamagan
                     Text('${_subtitle[AppLang.uz]}\n${_subtitle[AppLang.ru]} · ${_subtitle[AppLang.en]}',

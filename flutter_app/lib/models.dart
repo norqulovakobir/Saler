@@ -223,6 +223,8 @@ class Courier {
   final String name;
   final String phone;
   final String email;
+  final String region;
+  final String plate;
   final String? photo;
   final String vehicle; // foot | bike | moto | car
   final String vehicleType; // yuk: labo | damas | gazel | isuzu | fura
@@ -239,7 +241,7 @@ class Courier {
   final double? distanceKm;
   final int? estimatedPrice; // yuk tashuvchi: tanlangan yo'nalish uchun taxminiy narx, so'm
   final double? routeKm; // yuk tashuvchi: yo'nalish masofasi, km
-  Courier({required this.id, this.type = 'courier', required this.name, required this.phone, this.email = '', this.photo, this.vehicle = 'foot', this.vehicleType = '', this.capacityKg = 0, this.regions = const [], this.pricePerKm = 0, this.basePrice = 0, this.about = '', this.online = false, this.lat, this.lon, this.deliveries = 0, this.rating = 5, this.distanceKm, this.estimatedPrice, this.routeKm});
+  Courier({required this.id, this.type = 'courier', required this.name, required this.phone, this.email = '', this.region = '', this.plate = '', this.photo, this.vehicle = 'foot', this.vehicleType = '', this.capacityKg = 0, this.regions = const [], this.pricePerKm = 0, this.basePrice = 0, this.about = '', this.online = false, this.lat, this.lon, this.deliveries = 0, this.rating = 5, this.distanceKm, this.estimatedPrice, this.routeKm});
   bool get isCargo => type == 'cargo';
   bool get hasTariff => basePrice > 0 || pricePerKm > 0;
 
@@ -251,6 +253,8 @@ class Courier {
       name: j['name'] ?? '',
       phone: j['phone'] ?? '',
       email: j['email'] ?? '',
+      region: j['region'] ?? '',
+      plate: j['plate'] ?? '',
       photo: j['photo'],
       vehicle: j['vehicle'] ?? 'foot',
       vehicleType: j['vehicleType'] ?? '',
@@ -270,7 +274,7 @@ class Courier {
     );
   }
 
-  Courier copyWith({bool? online, double? lat, double? lon, int? deliveries}) => Courier(id: id, type: type, name: name, phone: phone, email: email, photo: photo, vehicle: vehicle, vehicleType: vehicleType, capacityKg: capacityKg, regions: regions, pricePerKm: pricePerKm, basePrice: basePrice, about: about, online: online ?? this.online, lat: lat ?? this.lat, lon: lon ?? this.lon, deliveries: deliveries ?? this.deliveries, rating: rating, distanceKm: distanceKm);
+  Courier copyWith({bool? online, double? lat, double? lon, int? deliveries}) => Courier(id: id, type: type, name: name, phone: phone, email: email, region: region, plate: plate, photo: photo, vehicle: vehicle, vehicleType: vehicleType, capacityKg: capacityKg, regions: regions, pricePerKm: pricePerKm, basePrice: basePrice, about: about, online: online ?? this.online, lat: lat ?? this.lat, lon: lon ?? this.lon, deliveries: deliveries ?? this.deliveries, rating: rating, distanceKm: distanceKm, estimatedPrice: estimatedPrice, routeKm: routeKm);
 }
 
 /// Viloyatlararo yuk buyurtmasi

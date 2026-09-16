@@ -1,17 +1,19 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'api.dart';
 import 'l10n.dart';
 import 'notify.dart';
 import 'realtime.dart';
-import 'screens/account_screen.dart';
+import 'screens/auth/role_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'state.dart';
 import 'theme.dart';
 import 'screens/shops_screen.dart';
 import 'screens/reels_screen.dart';
-import 'screens/assistant_screen.dart';
-import 'screens/my_orders_screen.dart';
+import 'screens/buyer_profile_screen.dart';
+import 'screens/map_screen.dart';
 import 'screens/seller/seller_home.dart';
 import 'screens/seller/auth_screen.dart';
 import 'screens/courier/courier_home.dart';
@@ -24,16 +26,18 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
   // Kontent status bar va pastki tizim paneli ostiga ham cho'ziladi (edge-to-edge)
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-  runApp(const SalerApp());
+  runApp(const RydexApp());
 }
 
 /// Status bar ikonkalari mavzuga qarab qora/oq bo'ladi, panellar shaffof
 SystemUiOverlayStyle overlayFor(Brightness b) => SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
-      statusBarIconBrightness: b == Brightness.dark ? Brightness.light : Brightness.dark,
+      statusBarIconBrightness:
+          b == Brightness.dark ? Brightness.light : Brightness.dark,
       statusBarBrightness: b,
       systemNavigationBarColor: Colors.transparent,
-      systemNavigationBarIconBrightness: b == Brightness.dark ? Brightness.light : Brightness.dark,
+      systemNavigationBarIconBrightness:
+          b == Brightness.dark ? Brightness.light : Brightness.dark,
       systemNavigationBarContrastEnforced: false,
     );
 
@@ -49,8 +53,14 @@ class BootSplash extends StatelessWidget {
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
       body: Stack(children: [
-        Positioned(top: -140, left: -100, child: _Glow(p.accent.withValues(alpha: .18), 420)),
-        Positioned(bottom: -160, right: -120, child: _Glow(const Color(0xFFFF8A00).withValues(alpha: .14), 400)),
+        Positioned(
+            top: -140,
+            left: -100,
+            child: _Glow(p.accent.withValues(alpha: .18), 420)),
+        Positioned(
+            bottom: -160,
+            right: -120,
+            child: _Glow(const Color(0xFFFF8A00).withValues(alpha: .14), 400)),
         Center(
           child: Padding(
             padding: const EdgeInsets.all(28),
@@ -59,37 +69,70 @@ class BootSplash extends StatelessWidget {
                 tween: Tween(begin: 0, end: 1),
                 duration: const Duration(milliseconds: 650),
                 curve: Curves.easeOutBack,
-                builder: (_, v, child) => Opacity(opacity: v.clamp(0, 1), child: Transform.scale(scale: .7 + .3 * v, child: child)),
+                builder: (_, v, child) => Opacity(
+                    opacity: v.clamp(0, 1),
+                    child: Transform.scale(scale: .7 + .3 * v, child: child)),
                 child: Container(
-                width: 132,
-                height: 132,
-                decoration: BoxDecoration(shape: BoxShape.circle, boxShadow: [BoxShadow(color: p.accent.withValues(alpha: .35), offset: const Offset(0, 16), blurRadius: 44)]),
-                child: Image.asset('assets/img/logo_circle.png', fit: BoxFit.contain),
-              ),
+                  width: 132,
+                  height: 132,
+                  decoration: BoxDecoration(shape: BoxShape.circle, boxShadow: [
+                    BoxShadow(
+                        color: p.accent.withValues(alpha: .35),
+                        offset: const Offset(0, 16),
+                        blurRadius: 44)
+                  ]),
+                  child: Image.asset('assets/img/logo_circle.png',
+                      fit: BoxFit.contain),
+                ),
               ),
               const SizedBox(height: 22),
-              const Text('Saler AI', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -.6, color: Colors.white)),
+              const Text('Rydex',
+                  style: TextStyle(
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -.6,
+                      color: Colors.white)),
               const SizedBox(height: 4),
-              Text("Do'kon va AI sotuvchi", style: TextStyle(fontSize: 14, color: Colors.white.withValues(alpha: .6), fontWeight: FontWeight.w600)),
+              Text("Do'kon va AI sotuvchi",
+                  style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.white.withValues(alpha: .6),
+                      fontWeight: FontWeight.w600)),
               const SizedBox(height: 32),
               if (error == null)
                 SizedBox(
                   width: 120,
-                  child: ClipRRect(borderRadius: BorderRadius.circular(4), child: LinearProgressIndicator(minHeight: 4, color: p.accent, backgroundColor: p.accent.withValues(alpha: .15))),
+                  child: ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                          minHeight: 4,
+                          color: p.accent,
+                          backgroundColor: p.accent.withValues(alpha: .15))),
                 )
               else ...[
                 Container(
                   padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(color: p.danger.withValues(alpha: .18), borderRadius: BorderRadius.circular(16)),
+                  decoration: BoxDecoration(
+                      color: p.danger.withValues(alpha: .18),
+                      borderRadius: BorderRadius.circular(16)),
                   child: Row(children: [
                     Icon(Icons.cloud_off_rounded, color: p.danger),
                     const SizedBox(width: 10),
                     const Expanded(
-                        child: Text("Serverga ulanib bo'lmadi.\nInternetni tekshirib, qayta urinib ko'ring.", style: TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600, height: 1.4))),
+                        child: Text(
+                            "Serverga ulanib bo'lmadi.\nInternetni tekshirib, qayta urinib ko'ring.",
+                            style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                                height: 1.4))),
                   ]),
                 ),
                 const SizedBox(height: 14),
-                FilledButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh_rounded, size: 18), label: Text(tr('Qayta urinish'))),
+                FilledButton.icon(
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    label: Text(tr('Qayta urinish'))),
               ],
             ]),
           ),
@@ -105,17 +148,22 @@ class _Glow extends StatelessWidget {
   const _Glow(this.c, this.size);
   @override
   Widget build(BuildContext context) => IgnorePointer(
-        child: Container(width: size, height: size, decoration: BoxDecoration(shape: BoxShape.circle, gradient: RadialGradient(colors: [c, c.withValues(alpha: 0)]))),
+        child: Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(colors: [c, c.withValues(alpha: 0)]))),
       );
 }
 
-class SalerApp extends StatefulWidget {
-  const SalerApp({super.key});
+class RydexApp extends StatefulWidget {
+  const RydexApp({super.key});
   @override
-  State<SalerApp> createState() => _SalerAppState();
+  State<RydexApp> createState() => _RydexAppState();
 }
 
-class _SalerAppState extends State<SalerApp> {
+class _RydexAppState extends State<RydexApp> {
   late Future<void> _init = _boot();
 
   @override
@@ -132,7 +180,8 @@ class _SalerAppState extends State<SalerApp> {
     await Api.instance.init();
     await AppState.instance.load();
     await Notify.instance.init();
-    if (Api.instance.registered) AppState.instance.startLive();
+    // Jonli yangilanishlar mehmon uchun ham ishlaydi (buyurtma, pul, bildirishnoma)
+    AppState.instance.startLive();
   }
 
   @override
@@ -140,29 +189,33 @@ class _SalerAppState extends State<SalerApp> {
     return ListenableBuilder(
       listenable: AppState.instance,
       builder: (context, _) => MaterialApp(
-        title: 'Saler AI',
+        title: 'Rydex',
         debugShowCheckedModeBanner: false,
         theme: buildTheme(Brightness.light),
         darkTheme: buildTheme(Brightness.dark),
         themeMode: AppState.instance.themeMode,
-        builder: (ctx, child) => AnnotatedRegion<SystemUiOverlayStyle>(value: overlayFor(Theme.of(ctx).brightness), child: child!),
+        builder: (ctx, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+            value: overlayFor(Theme.of(ctx).brightness), child: child!),
         home: FutureBuilder(
           future: _init,
           builder: (context, snap) {
-            if (snap.connectionState != ConnectionState.done) return const BootSplash();
+            if (snap.connectionState != ConnectionState.done) {
+              return const BootSplash();
+            }
             if (snap.hasError) {
               debugPrint('Boot xatosi: ${snap.error}');
-              return BootSplash(error: '${snap.error}', onRetry: () => setState(() => _init = _boot()));
+              return BootSplash(
+                  error: '${snap.error}',
+                  onRetry: () => setState(() => _init = _boot()));
             }
             // Birinchi kirishda tanishtiruv: til tanlash va bannerlar, oxirida hisob ekrani
-            if (!AppState.instance.onboarded) return OnboardingScreen(onDone: () => setState(() {}));
-            // Ilovadan foydalanish uchun hisob majburiy
-            if (!Api.instance.registered) {
-              return AccountScreen(onDone: () {
-                AppState.instance.startLive();
-                Realtime.instance.restart();
-                setState(() {});
-              });
+            if (!AppState.instance.onboarded) {
+              return OnboardingScreen(onDone: () => setState(() {}));
+            }
+            // Kim bo'lib davom etish: xaridor to'g'ridan to'g'ri ilovaga kiradi,
+            // sotuvchi/kuryer/yuk tashuvchi ro'yxatdan o'tadi yoki hisobiga kiradi
+            if (!AppState.instance.rolePicked) {
+              return RoleScreen(onDone: () => setState(() {}));
             }
             return const RootShell();
           },
@@ -178,7 +231,10 @@ class TabNavigator extends StatelessWidget {
   final Widget root;
   const TabNavigator({super.key, required this.navKey, required this.root});
   @override
-  Widget build(BuildContext context) => Navigator(key: navKey, onGenerateRoute: (s) => MaterialPageRoute(builder: (_) => root, settings: s));
+  Widget build(BuildContext context) => Navigator(
+      key: navKey,
+      onGenerateRoute: (s) =>
+          MaterialPageRoute(builder: (_) => root, settings: s));
 }
 
 class NavItem {
@@ -188,65 +244,211 @@ class NavItem {
   const NavItem(this.icon, this.active, this.label);
 }
 
-/// Suzuvchi pastki navigatsiya (dizayndagi oq pill)
+/// Suzuvchi pastki navigatsiya — shaffof glass pill, aktiv bo'limga lime glow.
+/// Har rejim bir xil komponentdan foydalangani uchun xaridor, sotuvchi va
+/// kuryer interfeyslarining hissi yagona bo'lib qoladi.
 class FloatingNav extends StatelessWidget {
   final List<NavItem> items;
   final int index;
   final ValueChanged<int> onTap;
   final Map<int, int> badges;
-  const FloatingNav({super.key, required this.items, required this.index, required this.onTap, this.badges = const {}});
+  const FloatingNav(
+      {super.key,
+      required this.items,
+      required this.index,
+      required this.onTap,
+      this.badges = const {}});
   @override
   Widget build(BuildContext context) {
     final p = context.p;
+    final dark = context.isDark;
     return Padding(
-      padding: EdgeInsets.fromLTRB(16, 0, 16, 18 + MediaQuery.of(context).padding.bottom * .5),
-      child: Container(
+      padding: EdgeInsets.fromLTRB(
+          14, 0, 14, 12 + MediaQuery.of(context).padding.bottom * .28),
+      child: DecoratedBox(
         decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(22), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: context.isDark ? .45 : .14), offset: const Offset(0, 12), blurRadius: 32)]),
-        child: Glass(
-          radius: 22,
-          child: SizedBox(
-            height: 66,
-            child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Row(children: [
-                  for (var i = 0; i < items.length; i++)
-                    Expanded(
-                      child: InkWell(
-                        onTap: () => onTap(i),
-                        borderRadius: BorderRadius.circular(16),
-                        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                          Stack(clipBehavior: Clip.none, children: [
-                            AnimatedContainer(
-                              duration: const Duration(milliseconds: 200),
-                              width: 44,
-                              height: 30,
-                              decoration: BoxDecoration(color: i == index ? p.accentSoft : Colors.transparent, borderRadius: BorderRadius.circular(10)),
-                              child: Icon(i == index ? items[i].active : items[i].icon, size: 22, color: i == index ? p.text : p.muted),
-                            ),
-                            if ((badges[i] ?? 0) > 0)
-                              Positioned(
-                                top: -6,
-                                right: -4,
-                                child: Container(
-                                  constraints: const BoxConstraints(minWidth: 16),
-                                  height: 16,
-                                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                                  decoration: BoxDecoration(color: p.danger, borderRadius: BorderRadius.circular(8)),
-                                  alignment: Alignment.center,
-                                  child: Text('${badges[i]}', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800)),
-                                ),
-                              ),
-                          ]),
-                          const SizedBox(height: 3),
-                          Text(items[i].label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: i == index ? p.text : p.muted)),
-                        ]),
-                      ),
-                    ),
-                ])),
+          borderRadius: BorderRadius.circular(38),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withValues(alpha: dark ? .28 : .20),
+                offset: const Offset(0, 14),
+                blurRadius: 30,
+                spreadRadius: -6),
+            BoxShadow(
+                color:
+                    (dark ? Colors.white : Colors.black).withValues(alpha: .06),
+                blurRadius: 24),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(38),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+            child: Container(
+              height: 70,
+              decoration: BoxDecoration(
+                border: Border.all(
+                    color: Colors.white.withValues(alpha: dark ? .17 : .23)),
+                borderRadius: BorderRadius.circular(38),
+                // Ranglarning shaffofligi ostidagi kontentni ko'rsatadi,
+                // BackdropFilter esa uni yumshoq, "glass" ko'rinishda xiralashtiradi.
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    const Color(0xFF788596).withValues(alpha: dark ? .44 : .34),
+                    const Color(0xFF242B35).withValues(alpha: dark ? .63 : .54),
+                    const Color(0xFF111722).withValues(alpha: dark ? .72 : .62),
+                  ],
+                ),
+              ),
+              child: LayoutBuilder(
+                builder: (_, box) {
+                  final count = items.length;
+                  // Tanlangan bo'lim nomi uchun yetarli joy qoladi; qolgan
+                  // ikonkalarning oralig'i ekranga qarab avtomatik moslashadi.
+                  final activeWidth = count <= 3
+                      ? 132.0
+                      : count == 4
+                          ? 126.0
+                          : 118.0;
+                  final inactiveWidth = count <= 1
+                      ? box.maxWidth
+                      : (box.maxWidth - activeWidth) / (count - 1);
+                  return Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      for (var i = 0; i < count; i++)
+                        _GlowNavItem(
+                          item: items[i],
+                          selected: i == index,
+                          width: i == index ? activeWidth : inactiveWidth,
+                          badge: badges[i] ?? 0,
+                          badgeColor: p.danger,
+                          onTap: () => onTap(i),
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class _GlowNavItem extends StatelessWidget {
+  final NavItem item;
+  final bool selected;
+  final double width;
+  final int badge;
+  final Color badgeColor;
+  final VoidCallback onTap;
+  const _GlowNavItem(
+      {required this.item,
+      required this.selected,
+      required this.width,
+      required this.badge,
+      required this.badgeColor,
+      required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    // Aktiv bo'lim har ikki mavzuda tabiiy o'qiladi: tun rejimida oq,
+    // kunduzgi rejimda esa qora. Rangli accent faqat shu navigatsiya uchun
+    // ishlatilmaydi.
+    final dark = context.isDark;
+    final activeColor = dark ? Colors.white : const Color(0xFF101722);
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+      width: width,
+      height: 70,
+      child: Stack(
+          alignment: Alignment.center,
+          clipBehavior: Clip.none,
+          children: [
+            if (selected)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: RadialGradient(
+                        center: const Alignment(0, -.15),
+                        radius: .82,
+                        colors: [
+                          activeColor.withValues(alpha: dark ? .13 : .10),
+                          activeColor.withValues(alpha: dark ? .045 : .035),
+                          Colors.transparent
+                        ],
+                        stops: const [0, .46, 1],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onTap,
+                borderRadius: BorderRadius.circular(34),
+                splashColor: activeColor.withValues(alpha: .15),
+                highlightColor: Colors.white.withValues(alpha: .04),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: double.infinity,
+                  child: selected
+                      ? Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                              Icon(item.active,
+                                  size: 27,
+                                  color: activeColor,
+                                  shadows: [
+                                    Shadow(
+                                        color:
+                                            activeColor.withValues(alpha: .28),
+                                        blurRadius: 10)
+                                  ]),
+                              const SizedBox(height: 2),
+                              Text(item.label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      color: activeColor,
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: -.15)),
+                            ])
+                      : Icon(item.icon,
+                          size: 27, color: Colors.white.withValues(alpha: .72)),
+                ),
+              ),
+            ),
+            if (badge > 0)
+              Positioned(
+                top: 13,
+                right: selected ? 13 : (width - 42) / 2,
+                child: Container(
+                  constraints: const BoxConstraints(minWidth: 16),
+                  height: 16,
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  decoration: BoxDecoration(
+                      color: badgeColor,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                          color: const Color(0xFF242428), width: 1.5)),
+                  alignment: Alignment.center,
+                  child: Text('$badge',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800)),
+                ),
+              ),
+          ]),
     );
   }
 }
@@ -264,6 +466,8 @@ class _RootShellState extends State<RootShell> {
   bool courierMode = false;
   final keys = List.generate(5, (_) => GlobalKey<NavigatorState>());
   final messenger = GlobalKey<ScaffoldMessengerState>();
+  // Bo'limlar orasida yonga surib o'tish uchun
+  final pager = PageController();
 
   @override
   void initState() {
@@ -277,17 +481,39 @@ class _RootShellState extends State<RootShell> {
       m.hideCurrentMaterialBanner();
       m.showMaterialBanner(MaterialBanner(
         leading: Container(
-            width: 40, height: 40, decoration: BoxDecoration(color: context.p.accentSoft, borderRadius: BorderRadius.circular(12)), child: Icon(Icons.shopping_bag_rounded, color: context.p.accent)),
-        content: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-          Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
-          Text(body, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: context.p.muted))
-        ]),
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+                color: context.p.accentSoft,
+                borderRadius: BorderRadius.circular(12)),
+            child: Icon(Icons.shopping_bag_rounded, color: context.p.accent)),
+        content: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+              Text(body,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 13, color: context.p.muted))
+            ]),
         backgroundColor: context.p.card,
-        actions: [TextButton(onPressed: () => m.hideCurrentMaterialBanner(), child: Text(tr('Yopish')))],
+        actions: [
+          TextButton(
+              onPressed: () => m.hideCurrentMaterialBanner(),
+              child: Text(tr('Yopish')))
+        ],
       ));
-      Future.delayed(const Duration(seconds: 6), () => messenger.currentState?.hideCurrentMaterialBanner());
+      Future.delayed(const Duration(seconds: 6),
+          () => messenger.currentState?.hideCurrentMaterialBanner());
     };
     if (sellerMode) AppState.instance.startPolling();
+  }
+
+  @override
+  void dispose() {
+    pager.dispose();
+    super.dispose();
   }
 
   void switchMode(bool seller) {
@@ -296,29 +522,48 @@ class _RootShellState extends State<RootShell> {
       courierMode = false;
       index = 0;
     });
+    if (pager.hasClients) pager.jumpToPage(0);
     // Sotuvchi kirgan bo'lsa, buyurtmalarni kuzatishni har doim davom ettiramiz
-    AppState.instance.sellerShop != null ? AppState.instance.startPolling() : AppState.instance.stopPolling();
+    AppState.instance.sellerShop != null
+        ? AppState.instance.startPolling()
+        : AppState.instance.stopPolling();
     // Sessiya kanallari o'zgardi (do'kon), jonli aloqa qayta ulanadi
     Realtime.instance.restart();
   }
 
   void onTab(int i) {
+    if (i < 0 || i >= keys.length) return;
     if (i == index) {
       keys[i].currentState?.popUntil((r) => r.isFirst);
+      return;
+    }
+    final from = index;
+    setState(() => index = i);
+    // Yonma-yon bo'lsa suriladi, uzoq bo'lsa darhol o'tadi
+    if (!pager.hasClients) return;
+    if ((i - from).abs() <= 1) {
+      pager.animateToPage(i,
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic);
     } else {
-      setState(() => index = i);
+      pager.jumpToPage(i);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     // Til/mavzu o'zgarganda pastki navigatsiya ham yangilanadi
-    return ScaffoldMessenger(key: messenger, child: ListenableBuilder(listenable: AppState.instance, builder: (context, _) => _build(context)));
+    return ScaffoldMessenger(
+        key: messenger,
+        child: ListenableBuilder(
+            listenable: AppState.instance,
+            builder: (context, _) => _build(context)));
   }
 
   Widget _build(BuildContext context) {
     final visibleTab = sellerMode || courierMode ? -1 : index;
-    WidgetsBinding.instance.addPostFrameCallback((_) => rootTab.value = visibleTab);
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => rootTab.value = visibleTab);
     if (sellerMode && AppState.instance.sellerShop != null) {
       return SellerHome(onExit: () => switchMode(false));
     }
@@ -331,20 +576,36 @@ class _RootShellState extends State<RootShell> {
     // Til o'zgarganda tab sahifalari qayta quriladi (Navigator ichidagi sahifalar o'z-o'zidan yangilanmaydi)
     final lk = L10n.lang.name;
     final pages = [
-      TabNavigator(key: ValueKey('t0$lk'), navKey: keys[0], root: ShopsScreen(onSeller: () => switchMode(true))),
+      TabNavigator(
+          key: ValueKey('t0$lk'),
+          navKey: keys[0],
+          root: ShopsScreen(onSeller: () => switchMode(true))),
       // Reels: reytingi baland va qiziqishga mos mahsulotlar
-      TabNavigator(key: ValueKey('t1$lk'), navKey: keys[1], root: const ReelsScreen()),
-      // Chat tabi — ilova yordamchisi Sofia (do'kon topib tavsiya beradi)
-      TabNavigator(key: ValueKey('t2$lk'), navKey: keys[2], root: AssistantScreen(onClose: () => setState(() => index = 0))),
-      TabNavigator(key: ValueKey('t3$lk'), navKey: keys[3], root: const MyOrdersScreen()),
-      TabNavigator(key: ValueKey('t4$lk'), navKey: keys[4], root: SellerEntry(onEntered: () => switchMode(true), onCourierEntered: () {
-            setState(() {
-              courierMode = true;
-              sellerMode = false;
-              index = 0;
-            });
-            Realtime.instance.restart();
-          })),
+      TabNavigator(
+          key: ValueKey('t1$lk'), navKey: keys[1], root: const ReelsScreen()),
+      // Xarita tabi: do'konlar va yo'nalishlar. Sofia chatiga bosh sahifadagi
+      // banner orqali kiriladi, shu sabab navigatsiya bitta ortiqcha tabdan xoli.
+      TabNavigator(
+          key: ValueKey('t2$lk'),
+          navKey: keys[2],
+          root: const MapScreen(inTab: true)),
+      TabNavigator(
+          key: ValueKey('t3$lk'),
+          navKey: keys[3],
+          root: SellerEntry(
+              onEntered: () => switchMode(true),
+              onCourierEntered: () {
+                setState(() {
+                  courierMode = true;
+                  sellerMode = false;
+                  index = 0;
+                });
+                Realtime.instance.restart();
+              })),
+      TabNavigator(
+          key: ValueKey('t4$lk'),
+          navKey: keys[4],
+          root: const BuyerProfileScreen()),
     ];
     return PopScope(
       canPop: false,
@@ -355,19 +616,33 @@ class _RootShellState extends State<RootShell> {
       },
       child: Scaffold(
         extendBody: true,
-        body: IndexedStack(index: index, children: pages),
-        // Chat tabida panel yashiriladi; Reels'da panel kontent ustida suzib turadi
-        bottomNavigationBar: index == 2
-            ? null
-            : FloatingNav(
+        body: PageView(
+          controller: pager,
+          // Ichki Reels foto-sliderni va xaritani Flutter gesture arenasi
+          // birinchi oladi; bo'sh joyda esa yonga surish bilan keyingi bo'limga
+          // o'tiladi. Shu sabab barcha tablarda asosiy pager faol.
+          physics: const PageScrollPhysics(),
+          onPageChanged: (i) {
+            if (i >= 0 && i < keys.length && i != index) {
+              setState(() => index = i);
+            }
+          },
+          children: [for (final page in pages) KeepAlivePage(child: page)],
+        ),
+        // Reels va xarita ekranlarida ham panel kontent ustida suzib turadi.
+        bottomNavigationBar: FloatingNav(
           index: index,
           onTap: onTab,
           items: [
-            NavItem(Icons.storefront_outlined, Icons.storefront_rounded, tr("Do'konlar")),
-            NavItem(Icons.play_circle_outline_rounded, Icons.play_circle_rounded, tr('Reels')),
-            NavItem(Icons.chat_bubble_outline_rounded, Icons.chat_bubble_rounded, tr('Chat')),
-            NavItem(Icons.receipt_long_outlined, Icons.receipt_long_rounded, tr('Buyurtmalar')),
-            NavItem(Icons.person_outline_rounded, Icons.person_rounded, tr('Sotuvchi')),
+            NavItem(Icons.storefront_outlined, Icons.storefront_rounded,
+                tr("Do'konlar")),
+            NavItem(Icons.play_circle_outline_rounded,
+                Icons.play_circle_rounded, tr('Reels')),
+            NavItem(Icons.map_outlined, Icons.map_rounded, tr('Xarita')),
+            NavItem(Icons.grid_view_outlined, Icons.grid_view_rounded,
+                tr('Xizmatlar')),
+            NavItem(Icons.person_outline_rounded, Icons.person_rounded,
+                tr('Profil')),
           ],
         ),
       ),
@@ -379,10 +654,14 @@ class _RootShellState extends State<RootShell> {
 void showToast(BuildContext context, String msg, {bool error = false}) {
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
-    ..showSnackBar(SnackBar(content: Text(msg), backgroundColor: error ? Colors.red.shade700 : null, margin: const EdgeInsets.fromLTRB(16, 0, 16, 100)));
+    ..showSnackBar(SnackBar(
+        content: Text(msg),
+        backgroundColor: error ? Colors.red.shade700 : null,
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 100)));
 }
 
-Future<bool> confirmDialog(BuildContext context, String title, {String? text, String? ok, bool danger = false}) async {
+Future<bool> confirmDialog(BuildContext context, String title,
+    {String? text, String? ok, bool danger = false}) async {
   final okText = ok ?? tr('Ha');
   final r = await showDialog<bool>(
     context: context,
@@ -391,17 +670,34 @@ Future<bool> confirmDialog(BuildContext context, String title, {String? text, St
       icon: Container(
         width: 52,
         height: 52,
-        decoration: BoxDecoration(color: (danger ? c.p.danger : const Color(0xFFE8A317)).withValues(alpha: .14), borderRadius: BorderRadius.circular(16)),
-        child: Icon(danger ? Icons.delete_outline : Icons.info_outline, color: danger ? c.p.danger : const Color(0xFFA86F00)),
+        decoration: BoxDecoration(
+            color: (danger ? c.p.danger : const Color(0xFFE8A317))
+                .withValues(alpha: .14),
+            borderRadius: BorderRadius.circular(16)),
+        child: Icon(danger ? Icons.delete_outline : Icons.info_outline,
+            color: danger ? c.p.danger : const Color(0xFFA86F00)),
       ),
-      title: Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
-      content: text == null ? null : Text(text, textAlign: TextAlign.center, style: TextStyle(color: c.p.muted)),
+      title: Text(title,
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+      content: text == null
+          ? null
+          : Text(text,
+              textAlign: TextAlign.center, style: TextStyle(color: c.p.muted)),
       actionsAlignment: MainAxisAlignment.center,
       actions: [
         Row(children: [
-          Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(c, false), child: Text(tr('Bekor qilish')))),
+          Expanded(
+              child: OutlinedButton(
+                  onPressed: () => Navigator.pop(c, false),
+                  child: Text(tr('Bekor qilish')))),
           const SizedBox(width: 10),
-          Expanded(child: FilledButton(style: danger ? FilledButton.styleFrom(backgroundColor: c.p.danger) : null, onPressed: () => Navigator.pop(c, true), child: Text(okText))),
+          Expanded(
+              child: FilledButton(
+                  style: danger
+                      ? FilledButton.styleFrom(backgroundColor: c.p.danger)
+                      : null,
+                  onPressed: () => Navigator.pop(c, true),
+                  child: Text(okText))),
         ]),
       ],
     ),

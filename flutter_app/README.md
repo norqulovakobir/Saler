@@ -1,13 +1,13 @@
 # Saler AI — Flutter ilova
 
-Saler AI mobil ilovasi (Android/iOS). `server/` papkasidagi mustaqil backendga ulanadi.
+Saler AI mobil ilovasi (Android/iOS). Boshlang'ich ishlab chiqarish rejimida `cloudflare-worker/` dagi Cloudflare Worker + D1 backendiga ulanadi.
 
 ## Ishga tushirish
 
 1. Flutter SDK o'rnating: https://docs.flutter.dev/get-started/install
-2. `lib/config.dart` faylida serverning ochiq HTTPS manzilini yozing:
-   ```dart
-   const apiBase = 'https://sizning-server.uz';
+2. `env.json` ichida Worker HTTPS manzilini yozing. Masalan:
+   ```json
+   {"API_BASE":"https://saler-api.akobirnorqulov104.workers.dev","REALTIME_ENABLED":false}
    ```
 3. Terminalda:
    ```
@@ -62,5 +62,7 @@ flutter run --dart-define-from-file=env.json
 flutter build apk --dart-define-from-file=env.json
 ```
 
-- Emulyator + lokal bot: `"API_BASE": "http://10.0.2.2:3000"`
-- Haqiqiy telefon: Render'dagi server manzili, masalan `https://saler-server.onrender.com`
+- Eski Node server bilan lokal test: `"API_BASE": "http://10.0.2.2:3000"`, `"REALTIME_ENABLED": true`
+- Cloudflare Worker: `"API_BASE": "https://saler-api.akobirnorqulov104.workers.dev"`, `"REALTIME_ENABLED": false`
+
+`REALTIME_ENABLED: false` Workers bepul limitini tejaydi. Sotuvchi ekranidagi buyurtma belgisi va ro'yxatlar ilovadagi mavjud davriy yangilanish orqali olinadi.

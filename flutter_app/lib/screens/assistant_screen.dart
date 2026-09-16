@@ -43,7 +43,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
   bool busy = false;
   Position? me;
 
-  static const _hello = "Assalomu alaykum! Men Sofia, Saler AI yordamchisiman. Nima olmoqchisiz? Sizga mos do'konlarni topib, xaritada ko'rsataman.";
+  static const _hello = "Assalomu alaykum! Men Sofia, Rydex yordamchisiman. Nima olmoqchisiz? Sizga mos do'konlarni topib, xaritada ko'rsataman.";
 
   @override
   void initState() {

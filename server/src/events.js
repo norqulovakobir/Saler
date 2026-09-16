@@ -48,7 +48,7 @@ export function clientInfo(req) {
   const ua = clip(req.headers['user-agent']);
   return {
     device: clip(req.headers['x-device']) || (ua.includes('Mozilla') ? 'Brauzer' : "Noma'lum qurilma"),
-    app: clip(req.headers['x-app']) || (ua.includes('Mozilla') ? 'Veb-sayt' : 'Saler AI ilovasi'),
+    app: clip(req.headers['x-app']) || (ua.includes('Mozilla') ? 'Veb-sayt' : 'Rydex ilovasi'),
     ip: String(req.ip || '').replace(/^::ffff:/, ''),
     lat: ok ? lat : null,
     lon: ok ? lon : null,

@@ -2,17 +2,57 @@ import pg from 'pg';
 
 const { Pool } = pg;
 
-if (!process.env.DATABASE_URL) {
-  console.error("DATABASE_URL o'rnatilmagan. Render Postgres yoki boshqa Postgres manzilini bering.");
-  process.exit(1);
-}
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) throw new Error("DATABASE_URL o'rnatilmagan. PostgreSQL manzilini bering.");
 
-const ssl = /localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL) ? false : { rejectUnauthorized: false };
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl, max: 5 });
+const envInt = (key, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) => {
+  const value = Number(process.env[key]);
+  return Number.isInteger(value) && value >= min && value <= max ? value : fallback;
+};
+
+const localDatabase = /(?:localhost|127\.0\.0\.1|::1)/.test(databaseUrl);
+const useSsl = process.env.DATABASE_SSL == null
+  ? !localDatabase
+  : process.env.DATABASE_SSL.toLowerCase() === 'true';
+const ssl = useSsl ? { rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED === 'true' } : false;
+
+// Bitta Node process uchun kichik pool kifoya. PgBouncer ulangan bo'lsa ham,
+// bu limit databasega cheksiz yangi connection ochilishining oldini oladi.
+const poolMax = envInt('DB_POOL_MAX', 8, { min: 1, max: 30 });
+export const pool = new Pool({
+  connectionString: databaseUrl,
+  ssl,
+  max: poolMax,
+  min: 0,
+  idleTimeoutMillis: envInt('DB_POOL_IDLE_MS', 30_000, { min: 1_000, max: 300_000 }),
+  connectionTimeoutMillis: envInt('DB_CONNECT_TIMEOUT_MS', 5_000, { min: 500, max: 30_000 }),
+  query_timeout: envInt('DB_QUERY_TIMEOUT_MS', 25_000, { min: 1_000, max: 120_000 }),
+  statement_timeout: envInt('DB_STATEMENT_TIMEOUT_MS', 20_000, { min: 1_000, max: 120_000 }),
+  maxUses: envInt('DB_POOL_MAX_USES', 7_500, { min: 0, max: 100_000 }),
+  application_name: process.env.DB_APPLICATION_NAME || 'saler-api',
+});
+
+pool.on('error', (error) => {
+  // Idle connection xatosi so'rovni yiqitmasligi uchun pg pool yangisini ochadi.
+  console.error('PostgreSQL pool xatosi:', error.message);
+});
 
 export const q = (text, params = []) => pool.query(text, params);
 export const one = async (text, params = []) => (await pool.query(text, params)).rows[0] ?? null;
 export const all = async (text, params = []) => (await pool.query(text, params)).rows;
+
+export const dbPoolStats = () => ({
+  total: pool.totalCount,
+  idle: pool.idleCount,
+  waiting: pool.waitingCount,
+  max: poolMax,
+});
+
+let closePromise;
+export function closeDb() {
+  closePromise ??= pool.end();
+  return closePromise;
+}
 
 export async function migrate() {
   await q(`
@@ -219,6 +259,8 @@ export async function migrate() {
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );
   CREATE INDEX IF NOT EXISTS idx_user_searches_user ON user_searches(user_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_views_user ON product_views(user_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_likes_user ON product_likes(user_id, created_at);
   -- Takroriy mahsulotni aniqlash: normallashtirilgan nom va rasm xeshlari
   ALTER TABLE products ADD COLUMN IF NOT EXISTS name_key TEXT;
   ALTER TABLE products ADD COLUMN IF NOT EXISTS photo_hashes JSONB NOT NULL DEFAULT '{}';
@@ -242,6 +284,8 @@ export async function migrate() {
     window_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (email, purpose)
   );
+  -- Tasdiqlash kodi bitta emailning o'zida ham faqat bitta login/profilga tegishli.
+  ALTER TABLE email_codes ADD COLUMN IF NOT EXISTS binding TEXT NOT NULL DEFAULT '';
   -- Xaridor: ism, familiya, telegram, tasdiqlangan email; admin bloklashi
   ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT;
   ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT;
@@ -264,12 +308,34 @@ export async function migrate() {
   ALTER TABLE couriers ADD COLUMN IF NOT EXISTS plate TEXT NOT NULL DEFAULT '';
   ALTER TABLE couriers ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
   ALTER TABLE shops ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+
+  -- Bitta email butun Saler AI tizimida faqat bitta rol/hisobga tegishli.
+  -- Alohida users, shops va couriers jadvallarida buni UNIQUE bilan saqlab
+  -- bo'lmaydi, shu sabab markaziy reyestr ishlatiladi.
+  CREATE TABLE IF NOT EXISTS account_emails (
+    email TEXT PRIMARY KEY,
+    account_type TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  INSERT INTO account_emails(email, account_type, account_id)
+    SELECT lower(email), 'buyer', id::text FROM users
+    WHERE email IS NOT NULL AND email <> '' AND email_verified_at IS NOT NULL
+    ON CONFLICT (email) DO NOTHING;
+  INSERT INTO account_emails(email, account_type, account_id)
+    SELECT lower(email), 'seller', id FROM shops
+    WHERE email <> '' AND email_verified_at IS NOT NULL
+    ON CONFLICT (email) DO NOTHING;
+  INSERT INTO account_emails(email, account_type, account_id)
+    SELECT lower(email), type, id FROM couriers
+    WHERE email <> '' AND email_verified_at IS NOT NULL
+    ON CONFLICT (email) DO NOTHING;
   `);
   // Supabase public jadvallarni Data API orqali tashqariga ochadi. RLS yoqilsa, u yerdan hech narsa o'qib bo'lmaydi.
   // Server jadval egasi sifatida ulanadi, shuning uchun uning o'z so'rovlariga ta'sir qilmaydi.
   await q(`DO $$ DECLARE t text; BEGIN
     FOREACH t IN ARRAY ARRAY['users','sessions','shops','products','photos','orders','couriers','cargo_orders',
-      'notifications','chat_messages','shop_advice','product_views','logs','courier_advice','shop_ai_summary','follows','product_likes','reel_events','user_searches','email_codes'] LOOP
+      'notifications','chat_messages','shop_advice','product_views','logs','courier_advice','shop_ai_summary','follows','product_likes','reel_events','user_searches','email_codes','account_emails'] LOOP
       EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
     END LOOP;
   END $$;`);
