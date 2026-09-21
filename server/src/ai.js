@@ -1,16 +1,16 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { log, CATEGORY_SLUGS } from './util.js';
 
-// AI provayder: GEMINI_API_KEY berilsa Google Gemini, aks holda ANTHROPIC_API_KEY bo'lsa Claude ishlatiladi.
-const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
+// AI provayder: GROQ_API_KEY berilsa Groq, aks holda ANTHROPIC_API_KEY bo'lsa Claude ishlatiladi.
+const GROQ_KEY = process.env.GROQ_API_KEY || '';
+const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 // Asosiy model band (503) yoki limit tugagan (429) bo'lsa, shu model bilan yana bir marta urinib ko'riladi
-const GEMINI_FALLBACK = process.env.GEMINI_FALLBACK_MODEL ?? 'gemini-3.5-flash';
+const GROQ_FALLBACK = process.env.GROQ_FALLBACK_MODEL ?? 'openai/gpt-oss-20b';
 const CLAUDE_MODEL = process.env.AI_MODEL || 'claude-opus-5';
 
-const provider = GEMINI_KEY ? 'gemini' : process.env.ANTHROPIC_API_KEY ? 'anthropic' : null;
+const provider = GROQ_KEY ? 'groq' : process.env.ANTHROPIC_API_KEY ? 'anthropic' : null;
 export const aiEnabled = () => provider !== null;
-export const aiInfo = { provider, model: provider === 'gemini' ? GEMINI_MODEL : provider === 'anthropic' ? CLAUDE_MODEL : null };
+export const aiInfo = { provider, model: provider === 'groq' ? GROQ_MODEL : provider === 'anthropic' ? CLAUDE_MODEL : null };
 const client = provider === 'anthropic' ? new Anthropic() : null;
 
 /** Ilova chat pufakchalari oddiy matn ko'rsatadi: markdown belgilarini olib tashlaymiz */
@@ -24,7 +24,7 @@ export function plainText(t) {
     .replace(/`([^`\n]+)`/g, '$1');
 }
 
-const NO_AI = "AI yordamchi hozircha o'chirilgan (serverda GEMINI_API_KEY sozlanmagan). Do'konlar va mahsulotlarni katalogdan qidiring.";
+const NO_AI = "AI yordamchi hozircha o'chirilgan (serverda GROQ_API_KEY sozlanmagan). Do'konlar va mahsulotlarni katalogdan qidiring.";
 const REFUSED = "Bu so'rovga javob bera olmayman.";
 
 /** Tarix + yangi xabar: ketma-ket bir xil rollar birlashtiriladi, birinchisi user bo'lishi shart */
@@ -40,51 +40,44 @@ function toTurns(history, user) {
   return turns;
 }
 
-// ---------- Google Gemini ----------
-class GeminiError extends Error {
+// ---------- Groq (OpenAI-mos API) ----------
+class GroqError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 
-async function geminiGenerate(model, body) {
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+async function groqGenerate(model, body, effort) {
+  const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_KEY },
-    body: JSON.stringify(body),
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GROQ_KEY}` },
+    // `reasoning_effort` faqat fikrlaydigan modellarda qabul qilinadi
+    body: JSON.stringify({ ...body, model, ...(/gpt-oss|qwen3|deepseek-r1/.test(model) ? { reasoning_effort: effort } : {}) }),
     signal: AbortSignal.timeout(60_000),
   });
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new GeminiError(r.status, data?.error?.message || `HTTP ${r.status}`);
+  if (!r.ok) throw new GroqError(r.status, data?.error?.message || `HTTP ${r.status}`);
   return data;
 }
 
-async function askGemini({ system, turns, effort, maxTokens, json }) {
-  const bodyFor = (model) => {
-    const thinking = /^gemini-3/.test(model);
-    return {
-      systemInstruction: { parts: [{ text: system }] },
-      contents: turns.map((t) => ({ role: t.role === 'assistant' ? 'model' : 'user', parts: [{ text: t.text }] })),
-      generationConfig: {
-        // Fikrlash tokenlari uchun ham joy qoldiriladi
-        maxOutputTokens: maxTokens + 2048,
-        ...(json ? { responseMimeType: 'application/json' } : {}),
-        ...(thinking ? { thinkingConfig: { thinkingLevel: effort } } : {}),
-      },
-    };
+async function askGroq({ system, turns, effort, maxTokens, json }) {
+  const body = {
+    messages: [{ role: 'system', content: system }, ...turns.map((t) => ({ role: t.role, content: t.text }))],
+    max_completion_tokens: maxTokens,
+    temperature: 0.6,
+    // Prompt'larda "FAQAT JSON" yozilgan; massiv so'ralganda model uni obyekt
+    // ichida qaytaradi, parserlar esa massivni regex bilan ajratib oladi.
+    ...(json ? { response_format: { type: 'json_object' } } : {}),
   };
   let data;
   try {
-    data = await geminiGenerate(GEMINI_MODEL, bodyFor(GEMINI_MODEL));
+    data = await groqGenerate(GROQ_MODEL, body, effort);
   } catch (e) {
-    if (!(e instanceof GeminiError) || ![429, 500, 503].includes(e.status) || !GEMINI_FALLBACK || GEMINI_FALLBACK === GEMINI_MODEL) throw e;
-    log('AI', `${GEMINI_MODEL}: ${e.status}, zaxira model ishlatiladi: ${GEMINI_FALLBACK}`);
-    data = await geminiGenerate(GEMINI_FALLBACK, bodyFor(GEMINI_FALLBACK));
+    if (!(e instanceof GroqError) || ![429, 500, 503].includes(e.status) || !GROQ_FALLBACK || GROQ_FALLBACK === GROQ_MODEL) throw e;
+    log('AI', `${GROQ_MODEL}: ${e.status}, zaxira model ishlatiladi: ${GROQ_FALLBACK}`);
+    data = await groqGenerate(GROQ_FALLBACK, body, effort);
   }
-  if (data.promptFeedback?.blockReason) return REFUSED;
-  const c = data.candidates?.[0];
-  if (!c) return REFUSED;
-  const text = (c.content?.parts || []).filter((p) => p.text && !p.thought).map((p) => p.text).join('').trim();
-  if (!text && ['SAFETY', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'SPII', 'RECITATION'].includes(c.finishReason)) return REFUSED;
-  return text || '...';
+  const choice = data.choices?.[0];
+  if (choice?.finish_reason === 'content_filter') return REFUSED;
+  return (choice?.message?.content || '').trim() || '...';
 }
 
 // ---------- Anthropic Claude ----------
@@ -104,15 +97,15 @@ async function ask({ system, history = [], user, effort = 'low', maxTokens = 200
   if (!provider) return NO_AI;
   const turns = toTurns(history, user);
   try {
-    const text = provider === 'gemini'
-      ? await askGemini({ system, turns, effort, maxTokens, json })
+    const text = provider === 'groq'
+      ? await askGroq({ system, turns, effort, maxTokens, json })
       : await askClaude({ system, turns, effort, maxTokens });
     return json ? text : plainText(text);
   } catch (e) {
     const status = e?.status;
     log('AI xato', provider, status, e?.message);
     if ((status === 400 && /api key/i.test(e?.message || '')) || status === 401 || status === 403) {
-      return `AI kaliti noto'g'ri (${provider === 'gemini' ? 'GEMINI_API_KEY' : 'ANTHROPIC_API_KEY'}).`;
+      return `AI kaliti noto'g'ri (${provider === 'groq' ? 'GROQ_API_KEY' : 'ANTHROPIC_API_KEY'}).`;
     }
     if (status === 429 || status === 503 || status === 529) return 'AI hozir band, birozdan keyin urinib ko\'ring.';
     return 'AI javob bera olmadi, keyinroq urinib ko\'ring.';

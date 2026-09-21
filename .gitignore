@@ -2,3 +2,6 @@
 *.iml
 .DS_Store
 # har bir papkaning o'z .gitignore fayli bor (bot/, mini_app/, flutter_app/)
+
+# Tayyor APK fayllar (tarqatish uchun, git tarixiga kirmaydi)
+/apk/

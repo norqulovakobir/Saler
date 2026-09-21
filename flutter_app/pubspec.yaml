@@ -40,10 +40,15 @@ flutter:
       fonts:
         - asset: assets/fonts/Manrope.ttf
 
+# Ikonkalar `android/app/src/main/res` ichida tayyor turadi. Qayta yasash kerak
+# bo'lsa: flutter pub run flutter_launcher_icons
+# Foreground shaffof PNG bo'lishi shart — to'liq plitka rasm ishlatilsa
+# Android uni qirqib, chetlarida qora ramka qoldirardi.
 flutter_launcher_icons:
   android: true
   ios: false
-  image_path: "assets/img/logo.jpg"
+  image_path: "assets/brand/icon.png"
   min_sdk_android: 21
-  adaptive_icon_background: "#FFFFFF"
-  adaptive_icon_foreground: "assets/img/logo.jpg"
+  adaptive_icon_background: "#FEDD06"
+  adaptive_icon_foreground: "assets/brand/icon_fg.png"
+  adaptive_icon_monochrome: "assets/brand/icon_mono.png"

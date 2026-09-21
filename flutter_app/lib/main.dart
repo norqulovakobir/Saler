@@ -118,10 +118,13 @@ class BootSplash extends StatelessWidget {
                   child: Row(children: [
                     Icon(Icons.cloud_off_rounded, color: p.danger),
                     const SizedBox(width: 10),
-                    const Expanded(
+                    // Serverning o'z xabari ko'rsatiladi: "Server uyg'onmoqda",
+                    // "Internet aloqasi yo'q" yoki sozlama xatosi — nima
+                    // qilish kerakligi darhol ma'lum bo'lsin.
+                    Expanded(
                         child: Text(
-                            "Serverga ulanib bo'lmadi.\nInternetni tekshirib, qayta urinib ko'ring.",
-                            style: TextStyle(
+                            error!.replaceFirst('ApiException: ', '').trim(),
+                            style: const TextStyle(
                                 fontSize: 13,
                                 color: Colors.white,
                                 fontWeight: FontWeight.w600,

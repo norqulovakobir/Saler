@@ -20,6 +20,36 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+/// Oddiy so'rov uchun kutish muddati.
+const _netTimeout = Duration(seconds: 25);
+
+/// Render bepul tarifida server 15 daqiqa jimlikdan keyin uxlaydi va birinchi
+/// so'rov 30-60 soniya ketadi — keyingi urinishlarga uzoqroq muddat beriladi.
+const _wakeTimeout = Duration(seconds: 75);
+
+/// Tarmoq xatosi va server uyg'onayotgandagi 502/503/504 javoblarida so'rovni
+/// qayta yuboradi. Shu qatlam bo'lmasa, Render uxlab qolganida ilova darhol
+/// "Serverga ulanib bo'lmadi" deb xato beradi.
+Future<http.Response> _run(Future<http.Response> Function(Duration limit) send) async {
+  var problem = "Serverga ulanib bo'lmadi";
+  for (var attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await Future.delayed(Duration(seconds: 2 * attempt));
+    try {
+      final r = await send(attempt == 0 ? _netTimeout : _wakeTimeout);
+      if (r.statusCode == 502 || r.statusCode == 503 || r.statusCode == 504) {
+        problem = "Server uyg'onmoqda, biroz kuting";
+        continue;
+      }
+      return r;
+    } on TimeoutException {
+      problem = 'Server javob bermadi';
+    } on Exception {
+      problem = "Internet aloqasi yo'q";
+    }
+  }
+  throw ApiException(problem, 0);
+}
+
 /// Server bilan ishlash. Birinchi ishga tushganda mehmon akkaunt (token) oladi.
 class Api {
   Api._();
@@ -125,7 +155,9 @@ class Api {
   }
 
   Future<void> _guest(SharedPreferences prefs) async {
-    final r = await http.post(Uri.parse('$apiBase/api/auth/guest'), headers: {'Content-Type': 'application/json'}, body: jsonEncode({'name': userName}));
+    final uri = Uri.parse('$apiBase/api/auth/guest');
+    final body = jsonEncode({'name': userName});
+    final r = await _run((t) => http.post(uri, headers: {'Content-Type': 'application/json'}, body: body).timeout(t));
     if (r.statusCode != 200) throw ApiException('Serverga ulanib bo\'lmadi', r.statusCode);
     final j = jsonDecode(r.body);
     _token = j['token'];
@@ -159,7 +191,9 @@ class Api {
     final headers = {..._headers, 'Content-Type': imageMime};
     late http.Response response;
     try {
-      response = await http.post(uri, headers: headers, body: bytes);
+      response = await _run((t) => http.post(uri, headers: headers, body: bytes).timeout(t));
+    } on ApiException {
+      rethrow;
     } on Exception {
       throw ApiException("Rasmni serverga yuborib bo'lmadi", 0);
     }
@@ -222,15 +256,15 @@ class Api {
     final h = {..._headers, if (path.endsWith('/login') && _location != null) 'X-Location': _location!};
     switch (method) {
       case 'GET':
-        r = await http.get(uri, headers: h);
+        r = await _run((t) => http.get(uri, headers: h).timeout(t));
       case 'POST':
-        r = await http.post(uri, headers: h, body: b);
+        r = await _run((t) => http.post(uri, headers: h, body: b).timeout(t));
       case 'PUT':
-        r = await http.put(uri, headers: h, body: b);
+        r = await _run((t) => http.put(uri, headers: h, body: b).timeout(t));
       case 'PATCH':
-        r = await http.patch(uri, headers: h, body: b);
+        r = await _run((t) => http.patch(uri, headers: h, body: b).timeout(t));
       case 'DELETE':
-        r = await http.delete(uri, headers: h);
+        r = await _run((t) => http.delete(uri, headers: h).timeout(t));
     }
     // Token eskirgan bo'lsa — yangi mehmon akkaunt
     if (r.statusCode == 401 && path != '/api/auth/guest') {

@@ -13,6 +13,9 @@
   --muted: #6b7080;
   --accent: #0a0a0b;
   --accent-fg: #ffffff;
+  /* Brend sarig'i — ilova ikonkasidagi rang. Neytral admin palitrasini
+     buzmasligi uchun faqat fokus va brend belgilarida ishlatiladi. */
+  --brand: #fedd06;
   --shadow: 0 1px 2px rgba(10, 10, 11, 0.04), 0 1px 8px rgba(10, 10, 11, 0.04);
   --chart-grid: #e8e9ee;
   --chart-axis: #8a8f9c;
@@ -123,6 +126,15 @@ select.input { padding-right: 28px; appearance: none; background-image: url("dat
 .stat-value { font-size: 24px; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.15; }
 .kicker { font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+/* Klaviatura bilan yurganda qayerda turganini ko'rsatadi — sichqoncha bilan
+   bosilganda chiqmaydi. Ilgari faqat .input da fokus belgisi bor edi. */
+.btn:focus-visible, .nav-link:focus-visible, a:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+.input:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 45%, transparent); border-color: var(--brand); }
 .recharts-tooltip-wrapper { outline: none; }
 .recharts-legend-item-text { color: var(--text-2) !important; }
 .seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }

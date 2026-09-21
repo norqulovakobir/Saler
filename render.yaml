@@ -1,5 +1,5 @@
 # Render Blueprint: Dashboard -> New -> Blueprint -> shu repo
-# Baza va rasmlar Supabase'da (deploy/supabase/README.md). Render'da faqat server va admin panel ishlaydi.
+# Baza va rasmlar Supabase'da (deploy/supabase/README.md). Render'da server, admin panel va Flutter web ilova ishlaydi.
 services:
   - type: web
     name: saler-server
@@ -23,11 +23,13 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         generateValue: true
-      # Google AI Studio kaliti: chatlar, AI yordamchi, sotuvchi maslahatlari
-      - key: GEMINI_API_KEY
+      # Groq kaliti (console.groq.com/keys): chatlar, AI yordamchi, sotuvchi maslahatlari
+      - key: GROQ_API_KEY
         sync: false
-      - key: GEMINI_MODEL
-        value: gemini-3.6-flash
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
+      - key: GROQ_FALLBACK_MODEL
+        value: openai/gpt-oss-20b
       # Production: tasdiqlash kodi hech qachon javobda qaytmaydi
       - key: NODE_ENV
         value: production
@@ -53,3 +55,30 @@ services:
         value: "20"
       - key: NEXT_PUBLIC_API_URL
         value: https://saler-server.onrender.com
+
+  # Flutter ilovasining web versiyasi (Static Site). Build ~5-8 daqiqa: Flutter SDK render-build.sh orqali yuklanadi.
+  - type: web
+    name: saler-web
+    runtime: static
+    rootDir: flutter_app
+    buildCommand: ./render-build.sh
+    staticPublishPath: build/web
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: no-cache
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+      - path: /canvaskit/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+    envVars:
+      - key: API_BASE
+        value: https://saler-server.onrender.com
+      - key: BOT_USERNAME
+        value: saler_ai_bot

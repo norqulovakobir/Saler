@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { closeDb, migrate, one } from './db.js';
+import { closeDb, migrate, one, dbConfigured, dbConfigError } from './db.js';
 import { storageEnabled, publicUrl, ensureBucket, BUCKET } from './storage.js';
 import { HttpError, ah, log } from './util.js';
 import adminRouter from './admin.js';
@@ -22,11 +22,24 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '60mb' }));
 
 app.get('/', (_req, res) => res.json({ ok: true, name: 'Rydex server', time: new Date().toISOString() }));
-app.get('/health', (_req, res) => res.json({ ok: true }));
+// Baza holati: off (sozlanmagan) -> starting (migratsiya) -> ready | error.
+// Render health check servis tirik qolishi uchun doim 200 qaytaradi, sabab esa
+// `db` va `error` maydonlarida ko'rinadi (deploy "failed" bo'lib ketmasin).
+let dbState = dbConfigured ? 'starting' : 'off';
+let dbError = dbConfigured ? null : dbConfigError;
+
+app.get('/health', (_req, res) => {
+  res.json({ ok: true, db: dbState, ...(dbError ? { error: dbError } : {}) });
+});
+// Baza tayyor bo'lmasa, har bir API so'rovi "nima qilish kerak"ligini aytadi
+app.use((_req, res, next) => {
+  if (dbState === 'ready') return next();
+  res.status(503).json({ error: dbError || 'Baza hali tayyor emas, biroz kuting' });
+});
 // Bazaga haqiqiy so'rov yuboradi. Supabase bepul loyihasi 7 kun so'rovsiz qolib to'xtab qolmasligi uchun kuniga bir marta chaqirish mumkin.
 app.get('/health/db', ah(async (_req, res) => {
   await one('SELECT 1');
-  res.json({ ok: true, db: true });
+  res.json({ ok: true, db: true, migrated: dbState === 'ready' });
 }));
 
 // Rasmlar: eskilari photos jadvalidan beriladi, qolganlari Supabase Storage'ga yo'naltiriladi
@@ -95,12 +108,29 @@ process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
 process.once('SIGINT', () => { void shutdown('SIGINT'); });
 
 async function start() {
-  await migrate();
-  await setupStorage();
+  // Avval portni ochamiz: Render health check'i javob olsin va sozlama xatosi
+  // brauzerda ko'rinsin. Aks holda servis "deploy failed" bo'lib jim qoladi.
   httpServer = app.listen(port, '0.0.0.0', () => log(`Saler server ${port}-portda ishlayapti`));
+  if (!dbConfigured) {
+    log('ERROR', dbConfigError);
+    return;
+  }
+  try {
+    await migrate();
+    dbState = 'ready';
+    dbError = null;
+  } catch (error) {
+    // Servisni o'ldirmaymiz: /health va Logs orqali aniq sabab ko'rinsin,
+    // aks holda Render'da faqat "deploy failed" yozuvi qoladi.
+    dbState = 'error';
+    dbError = `Bazaga ulanib bo'lmadi: ${error.message}`;
+    log('ERROR', dbError);
+    return;
+  }
+  await setupStorage();
 }
 
 start().catch((error) => {
-  console.error('DB migratsiya xatosi:', error);
+  console.error('Serverni ishga tushirib bo‘lmadi:', error);
   process.exit(1);
 });

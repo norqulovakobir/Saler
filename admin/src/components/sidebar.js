@@ -68,7 +68,7 @@ export default function Sidebar() {
 function Brand({ compact }) {
   return (
     <div className={`flex items-center gap-2.5 ${compact ? '' : 'mb-5 px-1'}`}>
-      <div className="grid h-8 w-8 place-items-center rounded-[9px] bg-accent text-[13px] font-bold text-accent-fg">S</div>
+      <img src="/brand.png" alt="Rydex" width={32} height={32} className="h-8 w-8 rounded-[9px]" />
       <div className="leading-tight"><div className="text-[14px] font-semibold tracking-tight">Rydex</div><div className="kicker text-[10px]">Admin panel</div></div>
     </div>
   );

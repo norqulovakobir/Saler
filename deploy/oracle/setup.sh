@@ -81,8 +81,8 @@ PORT=3000
 DATABASE_URL=postgres://saler:${DB_PASS}@127.0.0.1:5432/saler
 ADMIN_PASSWORD=${NEW_ADMIN_PASS}
 # AI yordamchi uchun kalitni shu yerga yozing, keyin: sudo systemctl restart saler
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-3.6-flash
+GROQ_API_KEY=
+GROQ_MODEL=openai/gpt-oss-120b
 ENV
   )
 fi

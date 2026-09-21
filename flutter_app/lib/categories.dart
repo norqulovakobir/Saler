@@ -1,6 +1,6 @@
 import 'l10n.dart';
 
-/// Mahsulot kategoriyalari. Rasm kartochkalari `assets/img/cat/<slug>-<uz|ru|en>.png`
+/// Mahsulot kategoriyalari. Rasm kartochkalari `assets/img/cat/<slug>-<uz|ru|en>.webp`
 /// (kartochkadagi yozuv tanlangan tilga mos rasm orqali chiqadi).
 class Category {
   final String slug;
@@ -10,7 +10,7 @@ class Category {
   const Category(this.slug, this.uz, this.ru, this.en);
 
   String get name => switch (L10n.lang) { AppLang.ru => ru, AppLang.en => en, _ => uz };
-  String get asset => 'assets/img/cat/$slug-${L10n.lang.name}.png';
+  String get asset => 'assets/img/cat/$slug-${L10n.lang.name}.webp';
 }
 
 const categories = [

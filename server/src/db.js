@@ -2,8 +2,12 @@ import pg from 'pg';
 
 const { Pool } = pg;
 
-const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) throw new Error("DATABASE_URL o'rnatilmagan. PostgreSQL manzilini bering.");
+// DATABASE_URL Render'da qo'lda kiritiladi (blueprint'da sync: false). Berilmasa
+// import paytida qulab tushmaymiz — server ko'tariladi va /health aniq sabab
+// qaytaradi, aks holda servis jim o'ladi va ilova faqat "server ishlamayapti" deydi.
+export const dbConfigured = Boolean(process.env.DATABASE_URL);
+export const dbConfigError = "DATABASE_URL o'rnatilmagan: Render -> saler-server -> Environment bo'limiga Supabase Session pooler manzilini qo'ying.";
+const databaseUrl = process.env.DATABASE_URL || 'postgres://localhost:5432/postgres';
 
 const envInt = (key, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) => {
   const value = Number(process.env[key]);

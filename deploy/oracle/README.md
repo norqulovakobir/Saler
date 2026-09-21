@@ -103,7 +103,7 @@ ssh -i ~/.ssh/oracle_saler ubuntu@141.147.10.20
 sudo nano /etc/saler.env
 ```
 
-`GEMINI_API_KEY=` qatoriga Gemini kalitini yozing. **Ctrl+O**, **Enter**, **Ctrl+X** bilan saqlang. Keyin:
+`GROQ_API_KEY=` qatoriga Groq kalitini yozing. **Ctrl+O**, **Enter**, **Ctrl+X** bilan saqlang. Keyin:
 
 ```bash
 sudo systemctl restart saler

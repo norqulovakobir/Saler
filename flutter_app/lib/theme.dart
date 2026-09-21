@@ -24,14 +24,18 @@ class AppPalette extends ThemeExtension<AppPalette> {
     this.accentText = const Color(0xFF8C6A00),
   });
 
+  /// Brend sarig'i — ilova ikonkasidagi rang bilan bir xil (#FEDD06).
+  static const brand = Color(0xFFFEDD06);
+
   static const light = AppPalette(
     bg: Color(0xFFF6F5F2),
     card: Color(0xFFFFFFFF),
     text: Color(0xFF14161A),
     muted: Color(0xFF6B7280),
-    accent: Color(0xFFFFCC00),
-    accentSoft: Color(0xFFFFF1B3),
-    accentText: Color(0xFF8C6A00),
+    accent: brand,
+    accentSoft: Color(0xFFFFF6C2),
+    // Oq fonda o'qilishi uchun to'q oltin (sariqning o'zi kontrastga yetmaydi)
+    accentText: Color(0xFF7A5E00),
     dark: Color(0xFF14161A),
     onDark: Color(0xFFFFFFFF),
     success: Color(0xFF1F9D6A),
@@ -47,9 +51,9 @@ class AppPalette extends ThemeExtension<AppPalette> {
     card: Color(0xFF1C1F25),
     text: Color(0xFFF3F4F6),
     muted: Color(0xFF8A909C),
-    accent: Color(0xFFFFD633),
-    accentSoft: Color(0x33FFD633),
-    accentText: Color(0xFFFFD633),
+    accent: Color(0xFFFFE02E),
+    accentSoft: Color(0x33FFE02E),
+    accentText: Color(0xFFFFE02E),
     dark: Color(0xFF1C1F25),
     onDark: Color(0xFFFFFFFF),
     success: Color(0xFF34C58A),
@@ -148,5 +152,48 @@ ThemeData buildTheme(Brightness b) {
         contentTextStyle: TextStyle(color: p.onDark, fontWeight: FontWeight.w600),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+    // Quyidagilar berilmasa Material o'zining binafsha/ko'k ranglarini ishlatadi
+    // va brenddan chiqib ketadi.
+    iconTheme: IconThemeData(color: p.text),
+    progressIndicatorTheme: ProgressIndicatorThemeData(color: p.accent, linearTrackColor: p.accentSoft, circularTrackColor: Colors.transparent),
+    textSelectionTheme: TextSelectionThemeData(
+        cursorColor: p.accent, selectionColor: p.accent.withValues(alpha: .28), selectionHandleColor: p.accent),
+    switchTheme: SwitchThemeData(
+      thumbColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? p.onAccent : Colors.white),
+      trackColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? p.accent : p.border),
+      trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
+    ),
+    checkboxTheme: CheckboxThemeData(
+      fillColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? p.accent : Colors.transparent),
+      checkColor: WidgetStateProperty.all(p.onAccent),
+      side: BorderSide(color: p.muted, width: 1.5),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+    ),
+    radioTheme: RadioThemeData(
+      fillColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? p.accent : p.muted),
+    ),
+    sliderTheme: SliderThemeData(activeTrackColor: p.accent, thumbColor: p.accent, inactiveTrackColor: p.border),
+    listTileTheme: ListTileThemeData(
+      iconColor: p.muted,
+      textColor: p.text,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      titleTextStyle: TextStyle(fontFamily: 'Manrope', fontSize: 15, fontWeight: FontWeight.w700, color: p.text),
+      subtitleTextStyle: TextStyle(fontFamily: 'Manrope', fontSize: 13, fontWeight: FontWeight.w500, color: p.muted),
+    ),
+    tooltipTheme: TooltipThemeData(
+      decoration: BoxDecoration(color: p.dark, borderRadius: BorderRadius.circular(10)),
+      textStyle: TextStyle(fontFamily: 'Manrope', fontSize: 12, fontWeight: FontWeight.w600, color: p.onDark),
+    ),
+    popupMenuTheme: PopupMenuThemeData(
+      color: p.card,
+      elevation: 8,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: p.border)),
+      textStyle: TextStyle(fontFamily: 'Manrope', fontSize: 14, fontWeight: FontWeight.w600, color: p.text),
+    ),
+    scrollbarTheme: ScrollbarThemeData(
+      thickness: WidgetStateProperty.all(6),
+      radius: const Radius.circular(6),
+      thumbColor: WidgetStateProperty.all(p.muted.withValues(alpha: .45)),
+    ),
   );
 }

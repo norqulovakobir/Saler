@@ -1,46 +1,62 @@
 <!DOCTYPE html>
-<html>
+<html lang="uz">
 <head>
-  <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
-
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
-
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
-  -->
+  <!-- `flutter build web --base-href` shu qiymatni almashtiradi -->
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
-  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <!-- viewport tegini Flutter Web o'zi qo'yadi, bu yerda berilsa almashtiriladi -->
+  <meta name="description" content="Rydex — do'kon, AI sotuvchi va kuryer xizmati bitta ilovada.">
+  <meta name="theme-color" content="#0A0A0A">
 
-  <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Rydex">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
-
-  <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
   <title>Rydex</title>
   <link rel="manifest" href="manifest.json">
+
+  <style>
+    :root { color-scheme: dark; }
+    html, body { height: 100%; margin: 0; background: #0A0A0A; }
+    /* Flutter to'plami yuklanguncha ko'rinadigan brend ekrani — aks holda
+       bir necha soniya bo'sh oq sahifa turadi va ilova buzuqdek ko'rinadi. */
+    #boot {
+      position: fixed; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 22px;
+      background: #0A0A0A;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      transition: opacity .35s ease;
+    }
+    #boot img { width: 116px; height: 116px; animation: pop .6s cubic-bezier(.2,.9,.3,1.4) both; }
+    #boot .name { color: #fff; font-size: 24px; font-weight: 800; letter-spacing: -.5px; }
+    #boot .sub { color: rgba(255,255,255,.55); font-size: 13px; font-weight: 600; margin-top: -14px; }
+    #boot .bar { width: 120px; height: 4px; border-radius: 4px; background: rgba(254,221,6,.16); overflow: hidden; }
+    #boot .bar i { display: block; width: 40%; height: 100%; border-radius: 4px; background: #FEDD06; animation: slide 1.1s ease-in-out infinite; }
+    @keyframes pop { from { opacity: 0; transform: scale(.7); } to { opacity: 1; transform: scale(1); } }
+    @keyframes slide { 0% { transform: translateX(-110%); } 100% { transform: translateX(310%); } }
+    @media (prefers-reduced-motion: reduce) { #boot img, #boot .bar i { animation: none; } }
+  </style>
 </head>
 <body>
-  <!--
-    You can customize the "flutter_bootstrap.js" script.
-    This is useful to provide a custom configuration to the Flutter loader
-    or to give the user feedback during the initialization process.
+  <div id="boot">
+    <img src="icons/Icon-512.png" alt="Rydex">
+    <div class="name">Rydex</div>
+    <div class="sub">Do'kon va AI sotuvchi</div>
+    <div class="bar"><i></i></div>
+  </div>
 
-    For more details:
-    * https://docs.flutter.dev/platform-integration/web/initialization
-  -->
   <script src="flutter_bootstrap.js" async></script>
+  <script>
+    // Flutter birinchi kadrni chizgach brend ekrani yumshoq so'nadi
+    window.addEventListener('flutter-first-frame', function () {
+      var b = document.getElementById('boot');
+      if (!b) return;
+      b.style.opacity = '0';
+      setTimeout(function () { b.remove(); }, 400);
+    });
+  </script>
 </body>
 </html>

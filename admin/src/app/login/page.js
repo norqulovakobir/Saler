@@ -30,7 +30,7 @@ export default function Login() {
       <div className="absolute right-4 top-4"><ThemeToggle /></div>
       <form onSubmit={submit} className="card w-full max-w-[360px] p-7">
         <div className="mb-6 flex items-center gap-3">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-accent text-[15px] font-bold text-accent-fg">S</div>
+          <img src="/brand.png" alt="Rydex" width={40} height={40} className="h-10 w-10 rounded-xl" />
           <div><h1 className="text-[15px] font-semibold tracking-tight">Rydex Admin</h1><p className="text-xs text-muted">Boshqaruv paneliga kirish</p></div>
         </div>
         <label className="kicker mb-1.5 block">Admin parol</label>

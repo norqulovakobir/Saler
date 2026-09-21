@@ -17,7 +17,7 @@ Jadval(lar) birinchi ishga tushishda avtomatik yaratiladi (`src/db.js` -> `migra
 ## Render
 
 Repo ildizidagi `render.yaml` Blueprint: `saler-server`, `saler-admin`. Baza va rasmlar Supabase'da.
-Dashboard -> New -> Blueprint -> repo tanlang. Keyin `saler-server` Environment'da `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY` va ixtiyoriy `GEMINI_API_KEY` kiriting.
+Dashboard -> New -> Blueprint -> repo tanlang. Keyin `saler-server` Environment'da `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY` va ixtiyoriy `GROQ_API_KEY` kiriting.
 `ADMIN_PASSWORD` avtomatik yaratiladi, qiymatini Environment bo'limidan ko'ring.
 
 ## Supabase (bepul baza va rasmlar)
@@ -42,9 +42,9 @@ PostgreSQL connection pool, HTTPS va backup bilan pullik, barqaror serverga o'rn
 | `DB_POOL_MAX` | yo'q | Node process ochadigan maksimum Postgres connection, standart `8` |
 | `DB_QUERY_TIMEOUT_MS` | yo'q | Bitta SQL so'rovning client timeouti, standart `25000` ms |
 | `ADMIN_PASSWORD` | ha | Admin panel paroli |
-| `GEMINI_API_KEY` | yo'q | Google Gemini: AI yordamchi, do'kon chati, maslahatlar |
-| `GEMINI_MODEL` | yo'q | Standart `gemini-3.6-flash` |
-| `GEMINI_FALLBACK_MODEL` | yo'q | Asosiy model band bo'lsa ishlatiladi, standart `gemini-3.5-flash` |
+| `GROQ_API_KEY` | yo'q | Groq: AI yordamchi, do'kon chati, maslahatlar |
+| `GROQ_MODEL` | yo'q | Standart `openai/gpt-oss-120b` |
+| `GROQ_FALLBACK_MODEL` | yo'q | Asosiy model band bo'lsa ishlatiladi, standart `openai/gpt-oss-20b` |
 | `ANTHROPIC_API_KEY` | yo'q | Gemini kaliti bo'lmasa Claude ishlatiladi |
 | `AI_MODEL` | yo'q | Claude modeli, standart `claude-opus-5` |
 | `SUPABASE_URL` | yo'q | Berilsa, rasmlar Supabase Storage'ga yoziladi |

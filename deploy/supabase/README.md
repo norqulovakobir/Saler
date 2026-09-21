@@ -78,7 +78,7 @@ Render → **saler-server → Environment**:
 | `DATABASE_URL` | Session pooler manzili, parol bilan |
 | `SUPABASE_URL` | Project URL |
 | `SUPABASE_SECRET_KEY` | `sb_secret_...` |
-| `GEMINI_API_KEY` | Gemini kaliti, AI chatlar uchun |
+| `GROQ_API_KEY` | Groq kaliti, AI chatlar uchun |
 
 **Save, rebuild, and deploy**. **Logs** bo'limida shu qator chiqishi kerak:
 

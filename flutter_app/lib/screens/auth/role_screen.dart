@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../l10n.dart';
 import '../../state.dart';
-import '../../theme.dart';
 import '../../widgets.dart';
 import 'auth_ui.dart';
 import 'register_screen.dart';
@@ -10,6 +9,10 @@ import 'register_screen.dart';
 /// Tanishtiruvdan keyingi qadam: foydalanuvchi kim bo'lib faoliyat yuritishini tanlaydi.
 /// Xaridor — to'g'ridan to'g'ri ilovaga kiradi (kirish talab qilinmaydi).
 /// Sotuvchi, kuryer va yuk tashuvchi — ro'yxatdan o'tadi yoki hisobiga kiradi.
+///
+/// To'rt rol ham bir ekranda ro'yxat bo'lib turadi; tanlangani ochilib,
+/// imkoniyatlari va tugmalarini ko'rsatadi. Shu sababli tugmalar har bir
+/// kartochkada takrorlanmaydi va hech narsani surib izlash kerak emas.
 class RoleScreen extends StatefulWidget {
   final VoidCallback onDone;
   const RoleScreen({super.key, required this.onDone});
@@ -28,20 +31,13 @@ class _Role {
 }
 
 class _RoleScreenState extends State<RoleScreen> {
-  late final PageController pager = PageController(viewportFraction: .86);
   int index = 0;
-
-  @override
-  void dispose() {
-    pager.dispose();
-    super.dispose();
-  }
 
   List<_Role> get roles => [
         _Role('buyer', Icons.shopping_bag_rounded, tr('Xaridor'), tr("Do'konlarni ko'ring, Reels'dan mahsulot tanlang va buyurtma bering"),
             [tr("Minglab do'kon va mahsulot"), tr('Reels: siz uchun tanlangan mahsulotlar'), tr('AI sotuvchi bilan suhbat')], const Color(0xFF3B82F6)),
         _Role('seller', Icons.storefront_rounded, tr('Sotuvchi'), tr("Do'kon oching — AI sotuvchi mijozlar bilan 24/7 gaplashadi"),
-            [tr('AI sotuvchi va avtomatik javoblar'), tr('Buyurtmalar, analitika va hisobotlar'), tr('Obunachilarga yangi mahsulot darhol ko\'rinadi')], const Color(0xFFFFCC00)),
+            [tr('AI sotuvchi va avtomatik javoblar'), tr('Buyurtmalar, analitika va hisobotlar'), tr('Obunachilarga yangi mahsulot darhol ko\'rinadi')], const Color(0xFFFEDD06)),
         _Role('courier', Icons.two_wheeler_rounded, tr('Kuryer'), tr('Buyurtmalarni yetkazing va daromad qiling'),
             [tr('Yaqin buyurtmalar avtomatik biriktiriladi'), tr('Marshrut rejasi va navigatsiya'), tr('Daromad statistikasi va AI maslahatlar')], const Color(0xFF1F9D6A)),
         _Role('cargo', Icons.local_shipping_rounded, tr('Yuk tashuvchi'), tr('Viloyatlararo yuk tashing — mijozlar sizni topadi'),
@@ -68,7 +64,6 @@ class _RoleScreenState extends State<RoleScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.p;
     final list = roles;
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
@@ -78,61 +73,50 @@ class _RoleScreenState extends State<RoleScreen> {
           Positioned(top: -160, left: -120, child: AuthGlow(list[index].glow.withValues(alpha: .18), 460)),
           Positioned(bottom: -180, right: -130, child: AuthGlow(const Color(0xFFFF8A00).withValues(alpha: .10), 420)),
           SafeArea(
-            child: Column(children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 10, 12, 0),
-                child: Row(children: [
-                  Image.asset('assets/img/logo_circle.png', width: 34, height: 34),
-                  const SizedBox(width: 10),
-                  const Text('Rydex', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -.4)),
-                  const Spacer(),
-                  const LangBtn(),
-                ]),
-              ),
-              const SizedBox(height: 10),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 22),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(tr('Kim bo\'lib davom etasiz?'), style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -.6, height: 1.15)),
-                  const SizedBox(height: 6),
-                  Text(tr("Yonga suring va o'zingizga mos bo'limni tanlang"), style: TextStyle(color: Colors.white.withValues(alpha: .6), fontSize: 14, fontWeight: FontWeight.w500)),
-                ]),
-              ),
-              const SizedBox(height: 14),
-              Expanded(
-                child: PageView.builder(
-                  controller: pager,
-                  itemCount: list.length,
-                  onPageChanged: (i) => setState(() => index = i),
-                  itemBuilder: (_, i) => AnimatedPadding(
-                    duration: const Duration(milliseconds: 200),
-                    padding: EdgeInsets.symmetric(horizontal: 7, vertical: i == index ? 4 : 18),
-                    child: _RoleCard(
-                      role: list[i],
-                      onPrimary: () => list[i].key == 'buyer' ? _pickBuyer() : _open(list[i].key, register: true),
-                      onLogin: list[i].key == 'buyer' ? null : () => _open(list[i].key, register: false),
+            // Keng ekranda (web, planshet) cho'zilib ketmasligi uchun
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 460),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 10, 10, 0),
+                    child: Row(children: [
+                      Image.asset('assets/img/logo_circle.png', width: 32, height: 32),
+                      const SizedBox(width: 10),
+                      const Text('Rydex', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -.4)),
+                      const Spacer(),
+                      const LangBtn(),
+                    ]),
+                  ),
+                  const SizedBox(height: 16),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(tr('Kim bo\'lib davom etasiz?'),
+                          style: const TextStyle(color: Colors.white, fontSize: 25, fontWeight: FontWeight.w800, letterSpacing: -.6, height: 1.15)),
+                      const SizedBox(height: 5),
+                      Text(tr("Keyinchalik o'zgartirishingiz mumkin"),
+                          style: TextStyle(color: Colors.white.withValues(alpha: .55), fontSize: 13.5, fontWeight: FontWeight.w500)),
+                    ]),
+                  ),
+                  const SizedBox(height: 14),
+                  Expanded(
+                    child: ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
+                      itemCount: list.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 9),
+                      itemBuilder: (_, i) => _RoleTile(
+                        role: list[i],
+                        selected: i == index,
+                        onTap: () => setState(() => index = i),
+                        onPrimary: () => list[i].key == 'buyer' ? _pickBuyer() : _open(list[i].key, register: true),
+                        onLogin: list[i].key == 'buyer' ? null : () => _open(list[i].key, register: false),
+                      ),
                     ),
                   ),
-                ),
+                ]),
               ),
-              const SizedBox(height: 10),
-              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                for (var i = 0; i < list.length; i++)
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 220),
-                    margin: const EdgeInsets.symmetric(horizontal: 3),
-                    width: i == index ? 22 : 7,
-                    height: 7,
-                    decoration: BoxDecoration(color: i == index ? p.accent : Colors.white.withValues(alpha: .25), borderRadius: BorderRadius.circular(4)),
-                  ),
-              ]),
-              const SizedBox(height: 6),
-              TextButton(
-                onPressed: _pickBuyer,
-                child: Text(tr("Hozircha shunchaki ko'rib chiqaman"), style: TextStyle(color: Colors.white.withValues(alpha: .65), fontWeight: FontWeight.w700)),
-              ),
-              SizedBox(height: MediaQuery.of(context).padding.bottom > 0 ? 2 : 10),
-            ]),
+            ),
           ),
         ]),
       ),
@@ -140,71 +124,137 @@ class _RoleScreenState extends State<RoleScreen> {
   }
 }
 
-class _RoleCard extends StatelessWidget {
+class _RoleTile extends StatelessWidget {
   final _Role role;
+  final bool selected;
+  final VoidCallback onTap;
   final VoidCallback onPrimary;
   final VoidCallback? onLogin;
-  const _RoleCard({required this.role, required this.onPrimary, this.onLogin});
+  const _RoleTile({required this.role, required this.selected, required this.onTap, required this.onPrimary, this.onLogin});
 
   @override
   Widget build(BuildContext context) {
-    final p = context.p;
-    final buyer = onLogin == null;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 22, 20, 18),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
-        color: const Color(0xFF16161A),
-        border: Border.all(color: Colors.white.withValues(alpha: .08)),
-        boxShadow: [BoxShadow(color: role.glow.withValues(alpha: .18), blurRadius: 40, offset: const Offset(0, 18))],
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Container(
-          width: 62,
-          height: 62,
-          decoration: BoxDecoration(color: role.glow.withValues(alpha: .16), borderRadius: BorderRadius.circular(20)),
-          child: Icon(role.icon, color: role.glow, size: 32),
+        borderRadius: BorderRadius.circular(20),
+        color: selected ? const Color(0xFF17171C) : Colors.white.withValues(alpha: .04),
+        border: Border.all(
+          color: selected ? role.glow.withValues(alpha: .55) : Colors.white.withValues(alpha: .07),
+          width: selected ? 1.5 : 1,
         ),
-        const SizedBox(height: 16),
-        Text(role.title, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800, letterSpacing: -.5)),
-        const SizedBox(height: 6),
-        Text(role.subtitle, style: TextStyle(color: Colors.white.withValues(alpha: .66), fontSize: 13.5, height: 1.45, fontWeight: FontWeight.w500)),
-        const SizedBox(height: 16),
-        for (final f in role.features)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 9),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Icon(Icons.check_circle_rounded, size: 17, color: role.glow.withValues(alpha: .9)),
-              const SizedBox(width: 9),
-              Expanded(child: Text(f, style: TextStyle(color: Colors.white.withValues(alpha: .8), fontSize: 13, height: 1.35, fontWeight: FontWeight.w600))),
+        boxShadow: selected ? [BoxShadow(color: role.glow.withValues(alpha: .16), blurRadius: 28, offset: const Offset(0, 12))] : null,
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(13, 12, 13, 12),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Row(children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: role.glow.withValues(alpha: selected ? .2 : .12),
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: Icon(role.icon, color: role.glow, size: 22),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                    Text(role.title,
+                        style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: -.3)),
+                    const SizedBox(height: 2),
+                    Text(role.subtitle,
+                        maxLines: selected ? 3 : 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: Colors.white.withValues(alpha: .6), fontSize: 12.5, height: 1.35, fontWeight: FontWeight.w500)),
+                  ]),
+                ),
+                const SizedBox(width: 8),
+                // Tanlangani belgi bilan, qolganlari "ochish" strelkasi bilan
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: selected ? role.glow : Colors.transparent,
+                    border: selected ? null : Border.all(color: Colors.white.withValues(alpha: .2)),
+                  ),
+                  child: selected ? const Icon(Icons.check_rounded, size: 15, color: Color(0xFF111111)) : null,
+                ),
+              ]),
+              AnimatedCrossFade(
+                duration: const Duration(milliseconds: 220),
+                sizeCurve: Curves.easeOut,
+                crossFadeState: selected ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+                firstChild: const SizedBox.shrink(),
+                secondChild: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  const SizedBox(height: 13),
+                  for (final f in role.features)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 7),
+                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Icon(Icons.check_rounded, size: 15, color: role.glow.withValues(alpha: .9)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(f,
+                              style: TextStyle(color: Colors.white.withValues(alpha: .78), fontSize: 12.5, height: 1.3, fontWeight: FontWeight.w600)),
+                        ),
+                      ]),
+                    ),
+                  const SizedBox(height: 6),
+                  if (onLogin != null)
+                    // Yonma-yon: to'rtta rol ham bitta ekranga sig'sin
+                    Row(children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: onLogin,
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(46),
+                            foregroundColor: Colors.white,
+                            backgroundColor: Colors.white.withValues(alpha: .07),
+                            side: BorderSide(color: Colors.white.withValues(alpha: .18)),
+                          ),
+                          child: Text(tr('Kirish')),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 2,
+                        child: FilledButton(
+                          onPressed: onPrimary,
+                          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(46)),
+                          child: Text(tr("Ro'yxatdan o'tish")),
+                        ),
+                      ),
+                    ])
+                  else ...[
+                    FilledButton(
+                      onPressed: onPrimary,
+                      style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(46)),
+                      child: Text(tr('Xarid qilishni boshlash')),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(tr("Buyurtma berishda email orqali tasdiqlaysiz"),
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.white.withValues(alpha: .4), fontSize: 11.5, fontWeight: FontWeight.w600)),
+                    ),
+                  ],
+                ]),
+              ),
             ]),
           ),
-        const Spacer(),
-        FilledButton(
-          onPressed: onPrimary,
-          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50)),
-          child: Text(buyer ? tr('Xarid qilishni boshlash') : tr("Ro'yxatdan o'tish")),
         ),
-        if (onLogin != null) ...[
-          const SizedBox(height: 8),
-          OutlinedButton(
-            onPressed: onLogin,
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size.fromHeight(48),
-              foregroundColor: Colors.white,
-              backgroundColor: Colors.white.withValues(alpha: .07),
-              side: BorderSide(color: Colors.white.withValues(alpha: .18)),
-            ),
-            child: Text(tr('Hisobim bor — Kirish')),
-          ),
-        ] else
-          Padding(
-            padding: const EdgeInsets.only(top: 10),
-            child: Center(
-              child: Text(tr("Buyurtma berishda email orqali tasdiqlaysiz"), style: TextStyle(color: p.muted, fontSize: 11.5, fontWeight: FontWeight.w600)),
-            ),
-          ),
-      ]),
+      ),
     );
   }
 }
