@@ -12,6 +12,7 @@ import '../state.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'assistant_screen.dart';
+import 'nearby_section.dart';
 import 'auth/auth_ui.dart';
 import 'auth/buyer_auth.dart';
 import 'category_screen.dart';
@@ -350,6 +351,9 @@ class _ShopsScreenState extends State<ShopsScreen> {
                 const SizedBox(height: 12),
                 // Kategoriya kartochkalari — Sofia banneri ostida, o'sha qora-sariq dizaynda; surib qidiriladi
                 const CategoryStrip(),
+                // Joylashuvga ruxsat berilgan bo'lsa — yaqin-atrofdagi eng
+                // yaxshi takliflar. Ruxsat berilmagan bo'lsa taklif kartochkasi.
+                const NearbySection(),
                 SectionTitle(tr("Do'konlar"),
                     action: tr('Xaritada'),
                     onAction: () => Navigator.of(context).push(

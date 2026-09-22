@@ -443,6 +443,89 @@ async function listShops(env, context, url) {
   };
 }
 
+/// "Sizga yaqin": joylashuvga ruxsat bergan xaridorga yaqin-atrofdagi
+/// eng yaxshi do'kon va mahsulotlarni ko'rsatadi.
+///
+/// Faqat masofa bo'yicha saralash yaxshi natija bermaydi: eng yaqin do'kon
+/// bo'sh yoki yangi bo'lishi mumkin. Shuning uchun ikkita omil ko'paytiriladi:
+///
+///   ball = yaqinlik × sifat
+///   yaqinlik = 1 / (1 + km / 3)   — 0 km: 1.0, 3 km: 0.5, 9 km: 0.25
+///   sifat    = 1 + log10(1 + sotuvlar×3 + obunachilar×2 + mahsulotlar)
+///
+/// log10 sifatning ta'sirini yumshatadi: 1000 ta sotuvli do'kon 10 ta sotuvlisidan
+/// cheksiz ustun bo'lib ketmaydi, lekin baribir oldinga chiqadi. Natijada
+/// yonginangizdagi kuchsiz do'kon ham, 10 km naridagi zo'r do'kon ham
+/// ro'yxatga tushadi — real bozordagi tanlovga o'xshaydi.
+const NEAR_SOFT_KM = 3;
+
+function nearbyScore(km, quality) {
+  const proximity = 1 / (1 + km / NEAR_SOFT_KM);
+  return proximity * (1 + Math.log10(1 + Math.max(0, quality)));
+}
+
+async function nearbyFeed(env, context, url) {
+  const lat = Number(url.searchParams.get('lat'));
+  const lon = Number(url.searchParams.get('lon'));
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+    throw new HttpError(400, 'Joylashuv notogri', { field: 'location' });
+  }
+  // `num(null)` nolga aylanadi, shuning uchun bo'sh qiymat alohida tekshiriladi
+  const rawRadius = url.searchParams.get('radius');
+  const radiusKm = Math.min(200, Math.max(1, rawRadius ? num(rawRadius, 25) : 25));
+  const shopLimit = limitOf(url.searchParams.get('shops'), 10, 30);
+  const productLimit = limitOf(url.searchParams.get('products'), 20, 60);
+
+  // Bazadan faqat kerakli kvadratni olamiz — butun jadvalni emas.
+  // 1 daraja kenglik ~111 km; uzunlikda kenglikka qarab qisqaradi.
+  const dLat = radiusKm / 111;
+  const dLon = radiusKm / Math.max(1, 111 * Math.cos((lat * Math.PI) / 180));
+  const shops = await all(env, SHOP_STATS + ` WHERE s.active=1
+    AND s.lat IS NOT NULL AND s.lon IS NOT NULL
+    AND s.lat BETWEEN ? AND ? AND s.lon BETWEEN ? AND ?`,
+    [lat - dLat, lat + dLat, lon - dLon, lon + dLon]);
+
+  const ranked = [];
+  for (const shop of shops) {
+    // Kvadrat doiradan kattaroq — chetdagilarni aniq masofa bilan chiqaramiz
+    const km = distanceKm(lat, lon, num(shop.lat), num(shop.lon));
+    if (km == null || km > radiusKm) continue;
+    const quality = num(shop.sales) * 3 + num(shop.followers) * 2 + num(shop.product_count);
+    ranked.push({ shop, km, score: nearbyScore(km, quality) });
+  }
+  ranked.sort((a, b) => b.score - a.score);
+
+  const topShops = ranked.slice(0, shopLimit);
+  let products = [];
+  if (topShops.length) {
+    const ids = topShops.map((item) => item.shop.id);
+    const rows = await all(env, `SELECT p.* FROM products p
+      WHERE p.active=1 AND p.shop_id IN (${ids.map(() => '?').join(',')})
+      ORDER BY p.views DESC, p.created_at DESC LIMIT ?`, [...ids, productLimit * 3]);
+    const byShop = new Map(topShops.map((item) => [item.shop.id, item]));
+    products = rows
+      .map((product) => {
+        const owner = byShop.get(product.shop_id);
+        // Mahsulot balli: do'konning yaqinligi + mahsulotning o'z talabi
+        const score = nearbyScore(owner.km, num(product.views) * 2 + num(owner.shop.sales) * 3);
+        return { product, owner, score };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, productLimit);
+  }
+
+  const round = (km) => Math.round(km * 10) / 10;
+  return {
+    radiusKm,
+    shops: topShops.map((item) => serializeShop(item.shop, { distanceKm: round(item.km) })),
+    products: products.map((item) => ({
+      ...serializeProduct(item.product),
+      shop: item.owner.shop.name,
+      distanceKm: round(item.owner.km),
+    })),
+  };
+}
+
 async function shopDetail(env, context, id) {
   const shop = await getShop(env, id);
   if (!shop || !bool(shop.active)) throw new HttpError(404, "Do'kon topilmadi");
@@ -1716,6 +1799,7 @@ async function api(request, env, execution, url) {
   if (path === '/cargo/orders' && method === 'POST') return json(await createCargoOrder(env, context, input));
   if (path === '/route' && method === 'GET') return json(await routeProxy(url));
 
+  if (path === '/nearby' && method === 'GET') return json(await nearbyFeed(env, context, url));
   if (path === '/shops' && method === 'GET') return json(await listShops(env, context, url));
   if (path === '/shops-map' && method === 'GET') {
     const rows = await all(env, SHOP_STATS + ' WHERE s.active=1 AND s.lat IS NOT NULL ORDER BY sales DESC');
