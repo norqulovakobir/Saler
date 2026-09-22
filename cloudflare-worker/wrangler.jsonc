@@ -4,6 +4,10 @@
   "main": "src/index.js",
   "compatibility_date": "2026-09-16",
   "keep_vars": true,
+  // Ulashish havolasi (/p/<id>, /s/<id>) shu manzilga o'tkazadi
+  "vars": {
+    "WEB_BASE": "https://saler-web.onrender.com"
+  },
   "preview_urls": false,
   "observability": {
     "enabled": true,

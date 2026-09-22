@@ -13,6 +13,9 @@ on:
 permissions:
   contents: write
 
+env:
+  ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -33,6 +36,19 @@ jobs:
           cache: true
 
       - run: flutter pub get
+
+      # Release imzosi: kalit repo Secrets'ida saqlanadi. Bo'lmasa build
+      # debug kalit bilan imzolanadi — bunday APK'ni Play Store qabul qilmaydi
+      # va u lokal imzolangan versiya ustiga o'rnatilmaydi.
+      - name: Imzo kalitini tayyorlash
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/app/rydex-release.jks
+          printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=rydex\nstoreFile=rydex-release.jks\n' \
+            "$ANDROID_KEY_PASSWORD" "$ANDROID_KEY_PASSWORD" > android/key.properties
 
       # API manzili lib/config.dart dagi prodApiBase dan olinadi
       # (Cloudflare Worker). Alohida env kerak emas.

@@ -1,7 +1,7 @@
 name: rydex_app
 description: Rydex — do'kon va AI sotuvchi mobil ilovasi.
 publish_to: "none"
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: ">=3.3.0 <4.0.0"

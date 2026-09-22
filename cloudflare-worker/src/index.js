@@ -1845,7 +1845,16 @@ export default {
     const url = new URL(request.url);
     try {
       if (url.pathname === '/' || url.pathname === '/health' || url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Saler AI API', database: Boolean(env.DB), email: Boolean(env.BREVO_API_KEY) });
+        // Production tekshiruvi: nimasi sozlanmaganini bitta so'rovda ko'rish uchun
+        return json({
+          ok: true,
+          service: 'Saler AI API',
+          database: Boolean(env.DB),
+          email: Boolean(env.BREVO_API_KEY && env.BREVO_SENDER_EMAIL),
+          emailSender: Boolean(env.BREVO_SENDER_EMAIL),
+          media: r2Enabled(env) ? 'r2' : 'd1',
+          admin: Boolean(env.ADMIN_PASSWORD),
+        });
       }
       // Ulashish havolalari: /p/<mahsulot> va /s/<do'kon>
       if (request.method === 'GET' && !url.pathname.startsWith('/api/')) {
