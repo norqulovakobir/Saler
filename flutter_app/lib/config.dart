@@ -5,9 +5,11 @@ import 'package:flutter/foundation.dart';
 ///   flutter build apk --dart-define-from-file=env.json
 /// Namuna: env.example.json. env.json git'ga kirmaydi.
 
-/// Ishlayotgan server manzili (Render Blueprint dagi `saler-server`).
+/// Ishlayotgan server manzili: Cloudflare Worker (`cloudflare-worker/`) —
+/// baza D1, rasmlar R2, tasdiqlash kodi Brevo orqali ketadi.
+/// Eski Express server (`server/`, Render) endi ishlatilmaydi.
 /// Oxirida `/` bo'lmasin.
-const prodApiBase = 'https://saler-server.onrender.com';
+const prodApiBase = 'https://saler-api.akobirnorqulov104.workers.dev';
 
 const _apiBaseOverride = String.fromEnvironment('API_BASE');
 
@@ -23,9 +25,11 @@ final apiBase = _apiBaseOverride.isNotEmpty
         ? prodApiBase
         : (kIsWeb ? 'http://localhost:3000' : 'http://10.0.2.2:3000');
 
-/// Doimiy SSE oqimi. Bepul tariflarda so'rov limitini tejash uchun o'chirilishi
-/// mumkin — sotuvchi buyurtma belgisi davriy yangilanish orqali ham keladi.
-const realtimeEnabled = bool.fromEnvironment('REALTIME_ENABLED', defaultValue: true);
+/// Doimiy SSE oqimi. Cloudflare Worker uzoq ochiq oqimni ushlab turolmaydi
+/// (`/api/events` bitta xabar yuborib yopiladi), shuning uchun default o'chiq —
+/// aks holda ilova uzluksiz qayta ulanishga urinadi. Buyurtma va bildirishnoma
+/// davriy yangilanish orqali ham keladi.
+const realtimeEnabled = bool.fromEnvironment('REALTIME_ENABLED', defaultValue: false);
 
 /// Ilova versiyasi (kirish xabarnomasida ko'rinadi)
 const appVersion = String.fromEnvironment('APP_VERSION', defaultValue: '1.0.0');

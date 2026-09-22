@@ -5,11 +5,18 @@ import 'package:flutter/services.dart';
 import '../../api.dart';
 import '../../l10n.dart';
 import '../../theme.dart';
+import '../../widgets.dart' show ThemeBtn;
 
 /// Ro'yxatdan o'tish va kirish ekranlarining umumiy qismlari:
-/// qora brend foni, maydonlar, xato matni va 6 xonali kodni tasdiqlash qadami.
+/// oq-sariq brend foni (tungi rejimda qora), maydonlar, xato matni va
+/// 6 xonali kodni tasdiqlash qadami.
 
-const kAuthBg = Color(0xFF0A0A0A);
+/// Ranglar butun kirish oqimi bilan bitta manbadan olinadi (lib/theme.dart)
+Color authBg(BuildContext c) => brandBg(c);
+Color authFg(BuildContext c) => brandFg(c);
+Color authFgSoft(BuildContext c, double a) => brandFgSoft(c, a);
+Color authSurface(BuildContext c, double a) => brandSurface(c, a);
+SystemUiOverlayStyle authOverlay(BuildContext c) => brandOverlay(c);
 
 /// Viloyatlar — server ro'yxati bilan bir xil (server/src/util.js REGIONS)
 const kRegions = <String>[
@@ -46,7 +53,8 @@ class AuthGlow extends StatelessWidget {
       );
 }
 
-/// Qora brend ekrani: orqaga tugmasi, qadam ko'rsatkichi, sarlavha va kontent
+/// Brend ekrani: orqaga tugmasi, qadam ko'rsatkichi, sarlavha va kontent.
+/// Kunduzi oq-sariq, tunda qora — tepadagi tugmadan almashtiriladi.
 class AuthShell extends StatelessWidget {
   final String title;
   final String? subtitle;
@@ -60,14 +68,15 @@ class AuthShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.p;
+    final dark = context.isDark;
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
+      value: authOverlay(context),
       child: Scaffold(
-        backgroundColor: kAuthBg,
+        backgroundColor: authBg(context),
         resizeToAvoidBottomInset: true,
         body: Stack(children: [
-          Positioned(top: -150, left: -110, child: AuthGlow(p.accent.withValues(alpha: .16), 420)),
-          Positioned(bottom: -170, right: -130, child: AuthGlow(const Color(0xFFFF8A00).withValues(alpha: .12), 420)),
+          Positioned(top: -150, left: -110, child: AuthGlow(p.accent.withValues(alpha: dark ? .16 : .42), 420)),
+          Positioned(bottom: -170, right: -130, child: AuthGlow(const Color(0xFFFF8A00).withValues(alpha: dark ? .12 : .16), 420)),
           SafeArea(
             child: Column(children: [
               Padding(
@@ -76,14 +85,17 @@ class AuthShell extends StatelessWidget {
                   if (onBack != null)
                     IconButton(
                       onPressed: onBack,
-                      icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: Colors.white),
-                      style: IconButton.styleFrom(backgroundColor: Colors.white.withValues(alpha: .08)),
+                      icon: Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: authFg(context)),
+                      style: IconButton.styleFrom(backgroundColor: authSurface(context, .08)),
                     )
                   else
                     const SizedBox(width: 8),
                   const Spacer(),
                   if (step != null && steps != null)
-                    Text('$step / $steps', style: TextStyle(color: Colors.white.withValues(alpha: .55), fontWeight: FontWeight.w800, fontSize: 13)),
+                    Text('$step / $steps', style: TextStyle(color: authFgSoft(context, .55), fontWeight: FontWeight.w800, fontSize: 13)),
+                  // Kun/tun rejimini shu yerdan ham almashtirish mumkin
+                  const SizedBox(width: 8),
+                  const ThemeBtn(size: 38),
                   if (action != null) ...[const SizedBox(width: 8), action!],
                 ]),
               ),
@@ -92,7 +104,7 @@ class AuthShell extends StatelessWidget {
                   padding: const EdgeInsets.fromLTRB(20, 2, 20, 0),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(value: step! / steps!, minHeight: 4, color: p.accent, backgroundColor: Colors.white.withValues(alpha: .1)),
+                    child: LinearProgressIndicator(value: step! / steps!, minHeight: 4, color: p.accent, backgroundColor: authSurface(context, .1)),
                   ),
                 ),
               Expanded(
@@ -104,10 +116,10 @@ class AuthShell extends StatelessWidget {
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 460),
                         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                          Text(title, style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -.6, height: 1.15)),
+                          Text(title, style: TextStyle(color: authFg(context), fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -.6, height: 1.15)),
                           if (subtitle != null) ...[
                             const SizedBox(height: 8),
-                            Text(subtitle!, style: TextStyle(color: Colors.white.withValues(alpha: .6), fontSize: 14, height: 1.45, fontWeight: FontWeight.w500)),
+                            Text(subtitle!, style: TextStyle(color: authFgSoft(context, .6), fontSize: 14, height: 1.45, fontWeight: FontWeight.w500)),
                           ],
                           const SizedBox(height: 20),
                           ...children,
@@ -125,16 +137,24 @@ class AuthShell extends StatelessWidget {
   }
 }
 
-/// Oq kartochka: maydonlar shu ichida (qora fonda o'qish qulay bo'lishi uchun)
+/// Kartochka: maydonlar shu ichida. Oq fonda chegara va yumshoq soya bilan ajralib turadi.
 class AuthCard extends StatelessWidget {
   final List<Widget> children;
   const AuthCard({super.key, required this.children});
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
-        decoration: BoxDecoration(color: context.p.card, borderRadius: BorderRadius.circular(24)),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
-      );
+  Widget build(BuildContext context) {
+    final p = context.p;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
+      decoration: BoxDecoration(
+        color: p.card,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: brandBorder(context)),
+        boxShadow: softShadow(context, y: 12, blur: 34, a: .07),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
+    );
+  }
 }
 
 /// Bo'limcha sarlavhasi (DO'KON, KIRISH MA'LUMOTLARI ...)
@@ -201,6 +221,8 @@ class AuthField extends StatelessWidget {
             prefixText: prefixText,
             prefixIcon: icon == null ? null : Icon(icon, size: 20, color: context.p.muted),
             suffixIcon: suffix,
+            // Oq kartochka ichida maydon ko'rinib tursin
+            fillColor: context.isDark ? null : const Color(0xFFFBF9F1),
           ),
         ),
       );
@@ -241,7 +263,7 @@ class AuthButton extends StatelessWidget {
         onPressed: busy ? null : onTap,
         style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
         child: busy
-            ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+            ? SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: context.p.onAccent))
             : Row(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
                 Flexible(child: Text(label, overflow: TextOverflow.ellipsis)),
                 if (icon != null) ...[const SizedBox(width: 8), Icon(icon, size: 18)],

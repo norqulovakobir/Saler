@@ -1,12 +1,20 @@
 # Render'ga chiqarish (va "ishlamadi" bo'lsa nima qilish)
 
+> **Backend qayerda:** ishlayotgan backend — **Cloudflare Worker**
+> (`cloudflare-worker/`, manzil `https://saler-api.akobirnorqulov104.workers.dev`):
+> baza **D1**, rasmlar **R2**, tasdiqlash kodi **Brevo** orqali ketadi.
+> `saler-web` va `saler-admin` shu Worker'ga ulanadi.
+> Quyidagi `saler-server` (Express + Postgres + EmailJS) — **eski** stack;
+> u hali o'chirilmagan, lekin ilova undan foydalanmaydi. Worker'ni deploy
+> qilish va uning kalitlari `cloudflare-worker/README.md` da yozilgan.
+
 Blueprint: Render Dashboard → **New → Blueprint** → shu repo → `render.yaml` o'qiladi va 3 ta servis yaratiladi:
 
 | Servis | Nima | Manzil |
 |---|---|---|
-| `saler-server` | Backend (Express + Postgres) | `https://saler-server.onrender.com` |
-| `saler-admin` | Admin panel (Next.js) | `https://saler-admin.onrender.com` |
-| `saler-web` | Flutter ilovaning web versiyasi (Static Site) | `https://saler-web.onrender.com` |
+| `saler-server` | Eski backend (Express + Postgres) — ishlatilmaydi | `https://saler-server.onrender.com` |
+| `saler-admin` | Admin panel (Next.js) → Worker'ga ulanadi | `https://saler-admin.onrender.com` |
+| `saler-web` | Flutter ilovaning web versiyasi (Static Site) → Worker'ga ulanadi | `https://saler-web.onrender.com` |
 
 ## 1. Majburiy env o'zgaruvchilar (`saler-server` → Environment)
 

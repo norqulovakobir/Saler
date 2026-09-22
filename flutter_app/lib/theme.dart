@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import 'anim.dart';
 
 /// Dizayn tizimi: yumshoq premium (A yo'nalish)
 class AppPalette extends ThemeExtension<AppPalette> {
@@ -75,6 +78,47 @@ extension PaletteX on BuildContext {
   bool get isDark => Theme.of(this).brightness == Brightness.dark;
 }
 
+/// Kirish oqimi (splash → til → tanishtiruv → rol → kirish/ro'yxat) uchun
+/// umumiy brend yuzasi. Kunduzi oq-sariq, tunda qora — barcha ekranda bir xil.
+/// Tungi rejim foni
+const kBrandDarkBg = Color(0xFF0A0A0A);
+
+/// Kunduzgi fon: iliq oq (sariq brend bilan bir ohangda)
+const kBrandLightBg = Color(0xFFFFFDF5);
+
+Color brandBg(BuildContext c) => c.isDark ? kBrandDarkBg : kBrandLightBg;
+
+/// Fon ustidagi asosiy matn
+Color brandFg(BuildContext c) => c.isDark ? Colors.white : const Color(0xFF14161A);
+
+/// Asosiy matnning yengilroq ko'rinishi (a — 0..1 shaffoflik)
+Color brandFgSoft(BuildContext c, double a) => brandFg(c).withValues(alpha: c.isDark ? a : (a + .18).clamp(0, 1));
+
+/// Fon ustidagi yengil yuza: tugma foni, chegara va h.k.
+Color brandSurface(BuildContext c, double a) =>
+    c.isDark ? Colors.white.withValues(alpha: a) : const Color(0xFF14161A).withValues(alpha: a * .8);
+
+/// Kartochka chegarasi: oq fonda iliq sariq, tunda odatdagi
+Color brandBorder(BuildContext c) => c.isDark ? const Color(0xFF262A33) : const Color(0xFFF0E6C0);
+
+/// Status bar ikonkalari fonga moslanadi
+SystemUiOverlayStyle brandOverlay(BuildContext c) => c.isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark;
+
+/// Kirish oqimidagi yumshoq rangli nur (fon bezagi)
+class BrandGlow extends StatelessWidget {
+  final Color color;
+  final double size;
+  const BrandGlow(this.color, this.size, {super.key});
+  @override
+  Widget build(BuildContext context) => IgnorePointer(
+        child: Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(shape: BoxShape.circle, gradient: RadialGradient(colors: [color, color.withValues(alpha: 0)])),
+        ),
+      );
+}
+
 /// Kartochka soyasi
 List<BoxShadow> softShadow(BuildContext c, {double y = 8, double blur = 24, double a = .05}) =>
     c.isDark ? const [] : [BoxShadow(color: const Color(0xFF14161A).withValues(alpha: a), offset: Offset(0, y), blurRadius: blur)];
@@ -89,6 +133,10 @@ ThemeData buildTheme(Brightness b) {
     colorScheme: ColorScheme.fromSeed(seedColor: p.accent, brightness: b).copyWith(primary: p.accent, onPrimary: p.onAccent, surface: p.card, onSurface: p.text, error: p.danger),
     textTheme: text,
     splashFactory: InkSparkle.splashFactory,
+    // Barcha platformada bir xil o'tish: fade-through (lib/anim.dart)
+    pageTransitionsTheme: PageTransitionsTheme(
+      builders: {for (final t in TargetPlatform.values) t: const FadeThroughTransitions()},
+    ),
     appBarTheme: AppBarTheme(
         backgroundColor: p.bg,
         foregroundColor: p.text,

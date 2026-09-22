@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../anim.dart';
 import '../l10n.dart';
 import '../state.dart';
 import '../theme.dart';
@@ -42,50 +43,132 @@ List<String> _bannerPaths(AppLang l) => [for (var i = 1; i <= _bannerCount; i++)
 const _bannerBg = Color(0xFFFDD528);
 
 // ---------- 1-qadam: til ----------
-class _LanguageStep extends StatelessWidget {
+/// Ilovaning birinchi ekrani — zamonaviy ilovalardagi uslub: yuqorida
+/// sarlavha, o'rtada tanlanadigan ro'yxat, pastda doimiy "Davom etish" tugmasi.
+/// Til bosilganda ekran darhol o'tib ketmaydi — sarlavha va tugma matni
+/// o'sha tilga almashadi, foydalanuvchi natijani ko'rib turib tasdiqlaydi.
+///
+/// Bayroq emojilari ishlatilmaydi: Windows va ba'zi Android'larda ular
+/// "UZ", "RU" qutichalari bo'lib chiqadi. O'rniga til kodi nishoni chizilgan.
+class _LanguageStep extends StatefulWidget {
   final ValueChanged<AppLang> onPick;
   const _LanguageStep({required this.onPick});
+  @override
+  State<_LanguageStep> createState() => _LanguageStepState();
+}
 
-  static const _subtitle = {AppLang.uz: "O'zingizga mos tilni tanlang", AppLang.ru: 'Выберите удобный язык', AppLang.en: 'Choose your language'};
+class _LanguageStepState extends State<_LanguageStep> {
+  static const _title = {AppLang.uz: 'Tilni tanlang', AppLang.ru: 'Выберите язык', AppLang.en: 'Choose your language'};
+  static const _sub = {
+    AppLang.uz: "Ilovadan o'zingizga qulay tilda foydalaning",
+    AppLang.ru: 'Пользуйтесь приложением на удобном языке',
+    AppLang.en: 'Use the app in the language you prefer',
+  };
+  static const _cta = {AppLang.uz: 'Davom etish', AppLang.ru: 'Продолжить', AppLang.en: 'Continue'};
+  static const _note = {
+    AppLang.uz: "Keyinchalik sozlamalardan o'zgartirasiz",
+    AppLang.ru: 'Позже можно изменить в настройках',
+    AppLang.en: 'You can change this later in settings',
+  };
+
+  AppLang sel = AppLang.uz;
+  bool busy = false;
+
+  void _go() {
+    setState(() => busy = true);
+    widget.onPick(sel);
+  }
 
   @override
   Widget build(BuildContext context) {
     final p = context.p;
+    final dark = context.isDark;
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
+      value: brandOverlay(context),
       child: Scaffold(
-        backgroundColor: const Color(0xFF0A0A0A),
+        backgroundColor: brandBg(context),
         body: Stack(children: [
-          Positioned(top: -150, left: -110, child: _Glow(p.accent.withValues(alpha: .16), 420)),
-          Positioned(bottom: -170, right: -130, child: _Glow(const Color(0xFFFF8A00).withValues(alpha: .12), 420)),
+          Positioned(top: -190, left: -80, child: BrandGlow(p.accent.withValues(alpha: dark ? .16 : .45), 470)),
+          Positioned(bottom: -200, right: -140, child: BrandGlow(const Color(0xFFFF8A00).withValues(alpha: dark ? .12 : .13), 430)),
           SafeArea(
             child: Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 440),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    Center(
-                      child: Container(
-                        width: 92,
-                        height: 92,
-                        decoration: BoxDecoration(shape: BoxShape.circle, boxShadow: [BoxShadow(color: p.accent.withValues(alpha: .35), blurRadius: 44, offset: const Offset(0, 16))]),
-                        child: Image.asset('assets/img/logo_circle.png', fit: BoxFit.contain),
-                      ),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 430),
+                child: Column(children: [
+                  // Yuqori qator: kichik logo va brend nomi
+                  AppearIn(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 18, 24, 0),
+                      child: Row(children: [
+                        Image.asset('assets/img/logo_circle.png', width: 34, height: 34),
+                        const SizedBox(width: 10),
+                        Text('Rydex',
+                            style: TextStyle(color: brandFg(context), fontSize: 17, fontWeight: FontWeight.w800, letterSpacing: -.4)),
+                      ]),
                     ),
-                    const SizedBox(height: 22),
-                    const Text('Rydex', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -.6)),
-                    const SizedBox(height: 6),
-                    // Uch tilda: foydalanuvchi hali tilni tanlamagan
-                    Text('${_subtitle[AppLang.uz]}\n${_subtitle[AppLang.ru]} · ${_subtitle[AppLang.en]}',
-                        textAlign: TextAlign.center, style: TextStyle(color: Colors.white.withValues(alpha: .6), fontSize: 14, height: 1.5, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 28),
-                    for (final l in AppLang.values) ...[
-                      _LangCard(l, onTap: () => onPick(l)),
-                      const SizedBox(height: 10),
-                    ],
-                  ]),
-                ),
+                  ),
+                  Expanded(
+                    child: ListView(
+                      padding: const EdgeInsets.fromLTRB(24, 30, 24, 16),
+                      children: [
+                        // Sarlavha tanlangan tilda yoziladi va tanlov bilan almashadi
+                        AppearIn(
+                          delay: const Duration(milliseconds: 70),
+                          child: AnimatedSwitcher(
+                            duration: kMedium,
+                            child: Text(_title[sel]!,
+                                key: ValueKey(sel),
+                                style: TextStyle(
+                                    color: brandFg(context), fontSize: 30, fontWeight: FontWeight.w800, letterSpacing: -.9, height: 1.15)),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        AppearIn(
+                          delay: const Duration(milliseconds: 120),
+                          child: AnimatedSwitcher(
+                            duration: kMedium,
+                            child: Text(_sub[sel]!,
+                                key: ValueKey(sel),
+                                style: TextStyle(color: brandFgSoft(context, .55), fontSize: 14.5, height: 1.45, fontWeight: FontWeight.w500)),
+                          ),
+                        ),
+                        const SizedBox(height: 26),
+                        for (final (i, l) in AppLang.values.indexed)
+                          AppearIn(
+                            delay: Duration(milliseconds: 170 + i * 70),
+                            child: Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: _LangRow(lang: l, selected: sel == l, onTap: () => setState(() => sel = l)),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  // Pastda doimiy tugma — ro'yxat uzun bo'lsa ham ko'rinib turadi
+                  AppearIn(
+                    delay: const Duration(milliseconds: 400),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 4, 24, 18),
+                      child: Column(children: [
+                        FilledButton(
+                          onPressed: busy ? null : _go,
+                          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+                          child: busy
+                              ? SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: p.onAccent))
+                              : Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                                  Text(_cta[sel]!, style: const TextStyle(fontSize: 16)),
+                                  const SizedBox(width: 8),
+                                  const Icon(Icons.arrow_forward_rounded, size: 19),
+                                ]),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(_note[sel]!,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: brandFgSoft(context, .42), fontSize: 12, fontWeight: FontWeight.w600)),
+                      ]),
+                    ),
+                  ),
+                ]),
               ),
             ),
           ),
@@ -95,41 +178,78 @@ class _LanguageStep extends StatelessWidget {
   }
 }
 
-class _LangCard extends StatefulWidget {
+/// Ro'yxat qatori: chapda til kodi nishoni, o'rtada nomi, o'ngda tanlov belgisi.
+/// Tanlanganda sariq chegara va belgi paydo bo'ladi — sakrash yo'q.
+class _LangRow extends StatelessWidget {
+  static const _latin = {AppLang.uz: 'Uzbek', AppLang.ru: 'Russian', AppLang.en: 'English'};
   final AppLang lang;
+  final bool selected;
   final VoidCallback onTap;
-  const _LangCard(this.lang, {required this.onTap});
-  @override
-  State<_LangCard> createState() => _LangCardState();
-}
+  const _LangRow({required this.lang, required this.selected, required this.onTap});
 
-class _LangCardState extends State<_LangCard> {
-  bool busy = false;
   @override
   Widget build(BuildContext context) {
     final p = context.p;
-    return Material(
-      color: Colors.white.withValues(alpha: .07),
-      borderRadius: BorderRadius.circular(18),
-      child: InkWell(
+    final dark = context.isDark;
+    return AnimatedContainer(
+      duration: kMedium,
+      curve: Curves.easeOutCubic,
+      decoration: BoxDecoration(
+        color: selected ? p.accentSoft : (dark ? p.card : Colors.white),
         borderRadius: BorderRadius.circular(18),
-        onTap: busy
-            ? null
-            : () {
-                setState(() => busy = true);
-                widget.onTap();
-              },
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-          decoration: BoxDecoration(borderRadius: BorderRadius.circular(18), border: Border.all(color: Colors.white.withValues(alpha: .12))),
-          child: Row(children: [
-            Text(L10n.flags[widget.lang]!, style: const TextStyle(fontSize: 28)),
-            const SizedBox(width: 14),
-            Expanded(child: Text(L10n.names[widget.lang]!, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 17))),
-            busy
-                ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: p.accent))
-                : Icon(Icons.arrow_forward_rounded, color: p.accent),
-          ]),
+        border: Border.all(color: selected ? p.accent : brandBorder(context), width: selected ? 1.8 : 1),
+        boxShadow: selected
+            ? [BoxShadow(color: p.accent.withValues(alpha: .26), blurRadius: 22, offset: const Offset(0, 10))]
+            : softShadow(context, y: 5, blur: 16, a: .04),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+            child: Row(children: [
+              // Til kodi nishoni — bayroq emojisiga bog'liq emas
+              AnimatedContainer(
+                duration: kMedium,
+                width: 44,
+                height: 44,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: selected ? p.accent : (dark ? Colors.white.withValues(alpha: .06) : const Color(0xFFF4F2EA)),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Text(lang.name.toUpperCase(),
+                    style: TextStyle(
+                        color: selected ? p.onAccent : brandFgSoft(context, .6),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: .5)),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(L10n.names[lang]!,
+                      style: TextStyle(color: brandFg(context), fontWeight: FontWeight.w800, fontSize: 16.5, letterSpacing: -.3)),
+                  Text(_latin[lang]!,
+                      style: TextStyle(color: brandFgSoft(context, .45), fontWeight: FontWeight.w600, fontSize: 12.5)),
+                ]),
+              ),
+              // Radio belgisi: tanlanmaganda halqa, tanlanganda sariq nuqta
+              AnimatedContainer(
+                duration: kMedium,
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: selected ? p.accent : Colors.transparent,
+                  border: selected ? null : Border.all(color: brandFgSoft(context, .22), width: 1.8),
+                ),
+                child: selected ? Icon(Icons.check_rounded, size: 16, color: p.onAccent) : null,
+              ),
+            ]),
+          ),
         ),
       ),
     );
@@ -318,12 +438,4 @@ class _Pill extends StatelessWidget {
       );
 }
 
-class _Glow extends StatelessWidget {
-  final Color c;
-  final double size;
-  const _Glow(this.c, this.size);
-  @override
-  Widget build(BuildContext context) => IgnorePointer(
-        child: Container(width: size, height: size, decoration: BoxDecoration(shape: BoxShape.circle, gradient: RadialGradient(colors: [c, c.withValues(alpha: 0)]))),
-      );
-}
+// Fon nuri endi umumiy: lib/theme.dart dagi BrandGlow

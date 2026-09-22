@@ -325,7 +325,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             child: Text(
               step == lastStep - 1 ? tr('Tugmani bosgach, emailingizga 6 xonali kod yuboriladi') : tr("Ma'lumotlar xavfsiz saqlanadi"),
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white.withValues(alpha: .45), fontSize: 12, fontWeight: FontWeight.w600, height: 1.4),
+              style: TextStyle(color: authFgSoft(context, .45), fontSize: 12, fontWeight: FontWeight.w600, height: 1.4),
             ),
           ),
         ],
@@ -694,7 +694,7 @@ class _LoginScreenState extends State<LoginScreen> {
             onPressed: busy
                 ? null
                 : () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => RegisterScreen(role: widget.role, onDone: widget.onDone))),
-            child: Text(tr("Hisobingiz yo'qmi? Ro'yxatdan o'tish"), style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w700)),
+            child: Text(tr("Hisobingiz yo'qmi? Ro'yxatdan o'tish"), style: TextStyle(color: authFgSoft(context, .7), fontWeight: FontWeight.w700)),
           ),
         ),
       ],

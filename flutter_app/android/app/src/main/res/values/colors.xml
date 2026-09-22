@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="launch_bg">#0A0A0A</color>
+    <!-- Kunduzgi splash: ilovaning oq-sariq yuzasi bilan bir xil -->
+    <color name="launch_bg">#FFFDF5</color>
     <color name="ic_launcher_background">#FEDD06</color>
 </resources>

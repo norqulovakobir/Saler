@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../l10n.dart';
 import '../../state.dart';
+import '../../theme.dart';
 import '../../widgets.dart';
 import 'auth_ui.dart';
 import 'register_screen.dart';
@@ -65,13 +66,14 @@ class _RoleScreenState extends State<RoleScreen> {
   @override
   Widget build(BuildContext context) {
     final list = roles;
+    final dark = context.isDark;
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
+      value: authOverlay(context),
       child: Scaffold(
-        backgroundColor: kAuthBg,
+        backgroundColor: authBg(context),
         body: Stack(children: [
-          Positioned(top: -160, left: -120, child: AuthGlow(list[index].glow.withValues(alpha: .18), 460)),
-          Positioned(bottom: -180, right: -130, child: AuthGlow(const Color(0xFFFF8A00).withValues(alpha: .10), 420)),
+          Positioned(top: -160, left: -120, child: AuthGlow(list[index].glow.withValues(alpha: dark ? .18 : .28), 460)),
+          Positioned(bottom: -180, right: -130, child: AuthGlow(const Color(0xFFFEDD06).withValues(alpha: dark ? .10 : .34), 420)),
           SafeArea(
             // Keng ekranda (web, planshet) cho'zilib ketmasligi uchun
             child: Center(
@@ -83,9 +85,11 @@ class _RoleScreenState extends State<RoleScreen> {
                     child: Row(children: [
                       Image.asset('assets/img/logo_circle.png', width: 32, height: 32),
                       const SizedBox(width: 10),
-                      const Text('Rydex', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -.4)),
+                      Text('Rydex', style: TextStyle(color: authFg(context), fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -.4)),
                       const Spacer(),
-                      const LangBtn(),
+                      const ThemeBtn(size: 38),
+                      const SizedBox(width: 8),
+                      const LangBtn(size: 38),
                     ]),
                   ),
                   const SizedBox(height: 16),
@@ -93,10 +97,10 @@ class _RoleScreenState extends State<RoleScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text(tr('Kim bo\'lib davom etasiz?'),
-                          style: const TextStyle(color: Colors.white, fontSize: 25, fontWeight: FontWeight.w800, letterSpacing: -.6, height: 1.15)),
+                          style: TextStyle(color: authFg(context), fontSize: 25, fontWeight: FontWeight.w800, letterSpacing: -.6, height: 1.15)),
                       const SizedBox(height: 5),
                       Text(tr("Keyinchalik o'zgartirishingiz mumkin"),
-                          style: TextStyle(color: Colors.white.withValues(alpha: .55), fontSize: 13.5, fontWeight: FontWeight.w500)),
+                          style: TextStyle(color: authFgSoft(context, .55), fontSize: 13.5, fontWeight: FontWeight.w500)),
                     ]),
                   ),
                   const SizedBox(height: 14),
@@ -134,17 +138,20 @@ class _RoleTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = context.isDark;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeOut,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
-        color: selected ? const Color(0xFF17171C) : Colors.white.withValues(alpha: .04),
+        color: dark
+            ? (selected ? const Color(0xFF17171C) : Colors.white.withValues(alpha: .04))
+            : (selected ? Colors.white : Colors.white.withValues(alpha: .7)),
         border: Border.all(
-          color: selected ? role.glow.withValues(alpha: .55) : Colors.white.withValues(alpha: .07),
+          color: selected ? role.glow.withValues(alpha: dark ? .55 : .8) : authSurface(context, .07),
           width: selected ? 1.5 : 1,
         ),
-        boxShadow: selected ? [BoxShadow(color: role.glow.withValues(alpha: .16), blurRadius: 28, offset: const Offset(0, 12))] : null,
+        boxShadow: selected ? [BoxShadow(color: role.glow.withValues(alpha: dark ? .16 : .22), blurRadius: 28, offset: const Offset(0, 12))] : null,
       ),
       child: Material(
         color: Colors.transparent,
@@ -169,12 +176,12 @@ class _RoleTile extends StatelessWidget {
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
                     Text(role.title,
-                        style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: -.3)),
+                        style: TextStyle(color: authFg(context), fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: -.3)),
                     const SizedBox(height: 2),
                     Text(role.subtitle,
                         maxLines: selected ? 3 : 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: Colors.white.withValues(alpha: .6), fontSize: 12.5, height: 1.35, fontWeight: FontWeight.w500)),
+                        style: TextStyle(color: authFgSoft(context, .6), fontSize: 12.5, height: 1.35, fontWeight: FontWeight.w500)),
                   ]),
                 ),
                 const SizedBox(width: 8),
@@ -186,7 +193,7 @@ class _RoleTile extends StatelessWidget {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: selected ? role.glow : Colors.transparent,
-                    border: selected ? null : Border.all(color: Colors.white.withValues(alpha: .2)),
+                    border: selected ? null : Border.all(color: authSurface(context, .2)),
                   ),
                   child: selected ? const Icon(Icons.check_rounded, size: 15, color: Color(0xFF111111)) : null,
                 ),
@@ -202,11 +209,11 @@ class _RoleTile extends StatelessWidget {
                     Padding(
                       padding: const EdgeInsets.only(bottom: 7),
                       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Icon(Icons.check_rounded, size: 15, color: role.glow.withValues(alpha: .9)),
+                        Icon(Icons.check_rounded, size: 15, color: context.isDark ? role.glow.withValues(alpha: .9) : context.p.success),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(f,
-                              style: TextStyle(color: Colors.white.withValues(alpha: .78), fontSize: 12.5, height: 1.3, fontWeight: FontWeight.w600)),
+                              style: TextStyle(color: authFgSoft(context, .78), fontSize: 12.5, height: 1.3, fontWeight: FontWeight.w600)),
                         ),
                       ]),
                     ),
@@ -219,9 +226,9 @@ class _RoleTile extends StatelessWidget {
                           onPressed: onLogin,
                           style: OutlinedButton.styleFrom(
                             minimumSize: const Size.fromHeight(46),
-                            foregroundColor: Colors.white,
-                            backgroundColor: Colors.white.withValues(alpha: .07),
-                            side: BorderSide(color: Colors.white.withValues(alpha: .18)),
+                            foregroundColor: authFg(context),
+                            backgroundColor: authSurface(context, .07),
+                            side: BorderSide(color: authSurface(context, .18)),
                           ),
                           child: Text(tr('Kirish')),
                         ),
@@ -246,7 +253,7 @@ class _RoleTile extends StatelessWidget {
                       padding: const EdgeInsets.only(top: 8),
                       child: Text(tr("Buyurtma berishda email orqali tasdiqlaysiz"),
                           textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.white.withValues(alpha: .4), fontSize: 11.5, fontWeight: FontWeight.w600)),
+                          style: TextStyle(color: authFgSoft(context, .4), fontSize: 11.5, fontWeight: FontWeight.w600)),
                     ),
                   ],
                 ]),

@@ -2,6 +2,7 @@ import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
+import 'anim.dart';
 import 'api.dart';
 import 'config.dart';
 import 'l10n.dart';
@@ -129,64 +130,172 @@ class LangBtn extends StatelessWidget {
       size: size, onTap: () => showLangSheet(context));
 }
 
-/// Til tanlash oynasi (xaridor va sotuvchi uchun bir xil)
+/// Til tanlash oynasi (xaridor va sotuvchi uchun bir xil).
+/// Ochilishda sariq nur bilan ko'tariladi, qatorlar ketma-ket chiqadi,
+/// tanlangani esa joyida belgi bilan yoniladi — oyna darhol yopilmaydi.
 void showLangSheet(BuildContext context) {
   showModalBottomSheet(
     useRootNavigator: true,
     context: context,
     showDragHandle: true,
-    builder: (c) => Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
-      child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(tr('Ilova tili'),
-                style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -.4)),
-            const SizedBox(height: 12),
-            for (final l in AppLang.values)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Material(
-                  color: L10n.lang == l ? c.p.accentSoft : c.p.card,
-                  borderRadius: BorderRadius.circular(16),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(16),
-                    onTap: () {
-                      AppState.instance.setLang(l);
-                      Navigator.pop(c);
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 12),
-                      decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                              color: L10n.lang == l ? c.p.accent : c.p.border,
-                              width: L10n.lang == l ? 1.5 : 1)),
-                      child: Row(children: [
-                        Text(L10n.flags[l]!,
-                            style: const TextStyle(fontSize: 22)),
-                        const SizedBox(width: 12),
-                        Expanded(
-                            child: Text(L10n.names[l]!,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 15))),
-                        if (L10n.lang == l)
-                          Icon(Icons.check_circle_rounded,
-                              color: c.p.accentText),
-                      ]),
-                    ),
-                  ),
+    backgroundColor: Colors.transparent,
+    elevation: 0,
+    builder: (c) => const _LangSheet(),
+  );
+}
+
+class _LangSheet extends StatefulWidget {
+  const _LangSheet();
+  @override
+  State<_LangSheet> createState() => _LangSheetState();
+}
+
+class _LangSheetState extends State<_LangSheet> {
+  AppLang? picked;
+
+  void _pick(AppLang l) async {
+    setState(() => picked = l);
+    AppState.instance.setLang(l);
+    // Tanlov ko'zga tashlansin, keyin oyna yopiladi
+    await Future.delayed(const Duration(milliseconds: 260));
+    if (mounted) Navigator.of(context).maybePop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    final cur = picked ?? L10n.lang;
+    return Container(
+      decoration: BoxDecoration(
+        color: p.bg,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        border: Border(top: BorderSide(color: p.accent.withValues(alpha: .5), width: 2)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Stack(children: [
+          // Tepadagi yumshoq sariq nur
+          Positioned(
+            top: -90,
+            left: 0,
+            right: 0,
+            child: IgnorePointer(
+              child: Container(
+                height: 180,
+                decoration: BoxDecoration(
+                  gradient: RadialGradient(
+                      colors: [p.accent.withValues(alpha: .35), p.accent.withValues(alpha: 0)]),
                 ),
               ),
-          ]),
-    ),
-  );
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              AppearIn(
+                child: Row(children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(color: p.accentSoft, borderRadius: BorderRadius.circular(14)),
+                    child: Icon(Icons.translate_rounded, color: p.accentText, size: 21),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(tr('Ilova tili'),
+                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: -.4)),
+                      Text(tr("Keyinchalik o'zgartirishingiz mumkin"),
+                          style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: p.muted)),
+                    ]),
+                  ),
+                ]),
+              ),
+              const SizedBox(height: 16),
+              for (final (i, l) in AppLang.values.indexed)
+                AppearIn(
+                  delay: Duration(milliseconds: 60 + i * 55),
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 9),
+                    child: _LangTile(lang: l, selected: cur == l, onTap: () => _pick(l)),
+                  ),
+                ),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+class _LangTile extends StatelessWidget {
+  static const _native = {AppLang.uz: "O'zbek tili", AppLang.ru: 'Русский язык', AppLang.en: 'English'};
+  final AppLang lang;
+  final bool selected;
+  final VoidCallback onTap;
+  const _LangTile({required this.lang, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    return AnimatedContainer(
+      duration: kMedium,
+      curve: Curves.easeOutCubic,
+      decoration: BoxDecoration(
+        color: selected ? p.accentSoft : p.card,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: selected ? p.accent : brandBorder(context), width: selected ? 1.6 : 1),
+        boxShadow: selected
+            ? [BoxShadow(color: p.accent.withValues(alpha: .28), blurRadius: 24, offset: const Offset(0, 11))]
+            : softShadow(context, y: 6, blur: 20, a: .04),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(22),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(children: [
+              // Til kodi nishoni: bayroq emojisi Windows'da chizilmaydi
+              AnimatedContainer(
+                duration: kMedium,
+                width: 44,
+                height: 44,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: selected ? p.accent : (context.isDark ? Colors.white.withValues(alpha: .06) : const Color(0xFFF4F2EA)),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Text(lang.name.toUpperCase(),
+                    style: TextStyle(
+                        color: selected ? p.onAccent : p.muted, fontSize: 14, fontWeight: FontWeight.w900, letterSpacing: .5)),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(L10n.names[lang]!, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, letterSpacing: -.3)),
+                  Text(_native[lang]!, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5, color: p.muted)),
+                ]),
+              ),
+              // Belgi joyida ochiladi (oyna sakramasligi uchun o'lcham doimiy)
+              AnimatedContainer(
+                duration: kMedium,
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: selected ? p.accent : Colors.transparent,
+                  border: selected ? null : Border.all(color: p.muted.withValues(alpha: .4), width: 1.8),
+                ),
+                child: selected ? Icon(Icons.check_rounded, size: 16, color: p.onAccent) : null,
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// Glassmorphism panel: orqasidagi kontent xiralashib ko'rinadi

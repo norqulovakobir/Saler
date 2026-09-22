@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'anim.dart';
 import 'api.dart';
 import 'l10n.dart';
 import 'notify.dart';
@@ -49,18 +50,19 @@ class BootSplash extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.p;
-    // Splash: Android splashi bilan bir xil — qora fon, sariq logo (Yandex uslubi)
+    final dark = context.isDark;
+    // Splash butun kirish oqimi bilan bir xil: kunduzi oq-sariq, tunda qora
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0A),
+      backgroundColor: brandBg(context),
       body: Stack(children: [
         Positioned(
             top: -140,
             left: -100,
-            child: _Glow(p.accent.withValues(alpha: .18), 420)),
+            child: _Glow(p.accent.withValues(alpha: dark ? .18 : .45), 420)),
         Positioned(
             bottom: -160,
             right: -120,
-            child: _Glow(const Color(0xFFFF8A00).withValues(alpha: .14), 400)),
+            child: _Glow(const Color(0xFFFF8A00).withValues(alpha: dark ? .14 : .16), 400)),
         Center(
           child: Padding(
             padding: const EdgeInsets.all(28),
@@ -73,42 +75,45 @@ class BootSplash extends StatelessWidget {
                     opacity: v.clamp(0, 1),
                     child: Transform.scale(scale: .7 + .3 * v, child: child)),
                 child: Container(
-                  width: 132,
-                  height: 132,
+                  width: 148,
+                  height: 148,
                   decoration: BoxDecoration(shape: BoxShape.circle, boxShadow: [
                     BoxShadow(
                         color: p.accent.withValues(alpha: .35),
                         offset: const Offset(0, 16),
                         blurRadius: 44)
                   ]),
-                  child: Image.asset('assets/img/logo_circle.png',
-                      fit: BoxFit.contain),
+                  // Logo atrofida aylanuvchi sariq yoy — yuklash belgisi
+                  child: RydexLoader(size: 148, showLogo: true, color: p.accent),
                 ),
               ),
               const SizedBox(height: 22),
-              const Text('Rydex',
-                  style: TextStyle(
-                      fontSize: 26,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -.6,
-                      color: Colors.white)),
+              AppearIn(
+                delay: const Duration(milliseconds: 160),
+                child: Text('Rydex',
+                    style: TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -.6,
+                        color: brandFg(context))),
+              ),
               const SizedBox(height: 4),
-              Text("Do'kon va AI sotuvchi",
-                  style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.white.withValues(alpha: .6),
-                      fontWeight: FontWeight.w600)),
-              const SizedBox(height: 32),
+              AppearIn(
+                delay: const Duration(milliseconds: 260),
+                child: Text("Do'kon va AI sotuvchi",
+                    style: TextStyle(
+                        fontSize: 14,
+                        color: brandFgSoft(context, .6),
+                        fontWeight: FontWeight.w600)),
+              ),
+              const SizedBox(height: 30),
               if (error == null)
-                SizedBox(
-                  width: 120,
-                  child: ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: LinearProgressIndicator(
-                          minHeight: 4,
-                          color: p.accent,
-                          backgroundColor: p.accent.withValues(alpha: .15))),
-                )
+                ShimmerText(tr('Yuklanmoqda'),
+                    style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.2,
+                        color: brandFgSoft(context, .45)))
               else ...[
                 Container(
                   padding: const EdgeInsets.all(14),
@@ -124,9 +129,9 @@ class BootSplash extends StatelessWidget {
                     Expanded(
                         child: Text(
                             error!.replaceFirst('ApiException: ', '').trim(),
-                            style: const TextStyle(
+                            style: TextStyle(
                                 fontSize: 13,
-                                color: Colors.white,
+                                color: brandFg(context),
                                 fontWeight: FontWeight.w600,
                                 height: 1.4))),
                   ]),

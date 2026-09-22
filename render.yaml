@@ -53,8 +53,9 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "20"
+      # Backend: Cloudflare Worker (D1 + R2 + Brevo)
       - key: NEXT_PUBLIC_API_URL
-        value: https://saler-server.onrender.com
+        value: https://saler-api.akobirnorqulov104.workers.dev
 
   # Flutter ilovasining web versiyasi (Static Site). Build ~5-8 daqiqa: Flutter SDK render-build.sh orqali yuklanadi.
   - type: web
@@ -78,7 +79,11 @@ services:
         name: Cache-Control
         value: public, max-age=31536000, immutable
     envVars:
+      # Backend: Cloudflare Worker (D1 + R2 + Brevo). Eski `saler-server` emas.
       - key: API_BASE
-        value: https://saler-server.onrender.com
+        value: https://saler-api.akobirnorqulov104.workers.dev
+      # Worker uzoq SSE oqimini ushlab turolmaydi — davriy yangilanish ishlatiladi
+      - key: REALTIME_ENABLED
+        value: "false"
       - key: BOT_USERNAME
         value: saler_ai_bot
