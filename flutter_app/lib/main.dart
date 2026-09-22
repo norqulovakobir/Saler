@@ -2,8 +2,10 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
 import 'anim.dart';
 import 'api.dart';
+import 'deeplink.dart';
 import 'l10n.dart';
 import 'notify.dart';
 import 'realtime.dart';
@@ -25,6 +27,10 @@ final rootTab = ValueNotifier<int>(0);
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // Web'da manzil `#` siz bo'ladi: ulashilgan havola `/p/<id>` ko'rinishida
+  // ochiladi va brauzerda chiroyli ko'rinadi (render.yaml `/*` ni index.html
+  // ga yo'naltiradi, shuning uchun bunday manzil 404 bermaydi).
+  usePathUrlStrategy();
   // Kontent status bar va pastki tizim paneli ostiga ham cho'ziladi (edge-to-edge)
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   runApp(const RydexApp());
@@ -215,6 +221,13 @@ class _RydexAppState extends State<RydexApp> {
               return BootSplash(
                   error: '${snap.error}',
                   onRetry: () => setState(() => _init = _boot()));
+            }
+            // Ulashilgan havola bilan kirilgan bo'lsa (/p/<id> yoki /s/<id>) —
+            // tanishtiruvsiz to'g'ridan to'g'ri mahsulot yoki do'kon ochiladi.
+            // Odam havolani bosganida darhol kerakli narsani ko'rishi shart.
+            final shared = DeepLink.pending;
+            if (shared != null) {
+              return SharedEntry(link: shared, onClose: () => setState(() => DeepLink.pending = null));
             }
             // Birinchi kirishda tanishtiruv: til tanlash va bannerlar, oxirida hisob ekrani
             if (!AppState.instance.onboarded) {

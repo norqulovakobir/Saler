@@ -745,17 +745,64 @@ Future<void> _addToCart(BuildContext context, Product p) async {
   if (context.mounted) showToast(context, tr("Savatchaga qo'shildi"));
 }
 
-/// Ulashish: tizimning ulashish oynasi (Telegram, SMS, ...)
+/// Ulashish: tizimning ulashish oynasi (Telegram, SMS, ...).
+/// Havola web sahifaga olib boradi — qabul qilgan odam ilovani o'rnatmasdan
+/// mahsulotni ko'radi va o'sha yerdan buyurtma bera oladi.
 void shareProduct(Product p) {
-  Share.share(
-      "${p.name} — ${fmtPrice(p.price)} so'm\nhttps://t.me/$botUsername?startapp=p_${p.id}",
-      subject: p.name);
+  Share.share("${p.name} — ${fmtPrice(p.price)} so'm\n${productLink(p.id)}", subject: p.name);
 }
 
 void shareShop(Shop s) {
-  Share.share(
-      "${s.name}${s.description.isNotEmpty ? ' — ${s.description}' : ''}\nhttps://t.me/$botUsername?startapp=shop_${s.id}",
-      subject: s.name);
+  Share.share("${s.name}${s.description.isNotEmpty ? ' — ${s.description}' : ''}\n${shopLink(s.id)}", subject: s.name);
+}
+
+/// Havolani buferga nusxalash (web'da ulashish oynasi bo'lmasligi mumkin)
+Future<void> copyLink(BuildContext context, String link) async {
+  await Clipboard.setData(ClipboardData(text: link));
+  if (context.mounted) showToast(context, tr('Havola nusxalandi'));
+}
+
+/// Ulashish varaqasi: ulashish yoki havolani nusxalash
+void showShareSheet(BuildContext context, {required String title, required String link, required VoidCallback onShare}) {
+  showModalBottomSheet(
+    context: context,
+    useRootNavigator: true,
+    showDragHandle: true,
+    builder: (c) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text(tr('Ulashish'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: -.4)),
+          const SizedBox(height: 4),
+          Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: c.p.muted, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(color: c.p.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: c.p.border)),
+            child: Text(link, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12.5, color: c.p.muted, fontWeight: FontWeight.w600)),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: () {
+              Navigator.pop(c);
+              onShare();
+            },
+            icon: const Icon(Icons.ios_share, size: 18),
+            label: Text(tr('Ulashish')),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: () {
+              Navigator.pop(c);
+              copyLink(context, link);
+            },
+            icon: const Icon(Icons.link_rounded, size: 18),
+            label: Text(tr('Havolani nusxalash')),
+          ),
+        ]),
+      ),
+    ),
+  );
 }
 
 /// Mahsulot sahifasi (to'liq ekran)

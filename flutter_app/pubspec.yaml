@@ -9,6 +9,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # Web'da manzilni `#` siz qilish uchun (ulashish havolalari: /p/<id>)
+  flutter_web_plugins:
+    sdk: flutter
   http: ^1.2.2
   shared_preferences: ^2.3.2
   image_picker: ^1.1.2

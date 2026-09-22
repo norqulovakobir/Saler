@@ -1,11 +1,13 @@
 import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:share_plus/share_plus.dart';
 import 'anim.dart';
 import 'api.dart';
 import 'config.dart';
 import 'l10n.dart';
+import 'main.dart' show showToast;
 import 'models.dart';
 import 'state.dart';
 import 'theme.dart';
@@ -478,6 +480,42 @@ class ShopAvatar extends StatelessWidget {
       );
 }
 
+/// Kichik ulashish tugmasi: kartochka burchagida turadi.
+/// Havola web sahifaga olib boradi — qabul qilgan odam ilovasiz ham
+/// mahsulotni ko'radi va buyurtma bera oladi (uzum uslubi).
+class ShareBtn extends StatelessWidget {
+  final String link;
+  final String title;
+  final String text;
+  final double size;
+  const ShareBtn({super.key, required this.link, required this.title, this.text = '', this.size = 30});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    return Material(
+      color: p.card.withValues(alpha: .92),
+      borderRadius: BorderRadius.circular(size * .33),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(size * .33),
+        onTap: () async {
+          await Share.share(text.isEmpty ? '$title\n$link' : '$title — $text\n$link', subject: title);
+        },
+        // Uzoq bosilganda havolaning o'zi nusxalanadi
+        onLongPress: () async {
+          await Clipboard.setData(ClipboardData(text: link));
+          if (context.mounted) showToast(context, tr('Havola nusxalandi'));
+        },
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: Icon(Icons.ios_share, size: size * .5, color: p.text),
+        ),
+      ),
+    );
+  }
+}
+
 /// Do'kon kartochkasi (bosh sahifa)
 class ShopCard extends StatelessWidget {
   final Shop s;
@@ -547,6 +585,8 @@ class ShopCard extends StatelessWidget {
                     : Center(child: ShopAvatar(s, size: 54)),
               ),
               Positioned(top: 8, right: 8, child: RatingPill(s)),
+              // Ulashish: havola web sahifani ochadi, u yerdan buyurtma berish mumkin
+              Positioned(top: 8, left: 8, child: ShareBtn(link: shopLink(s.id), title: s.name, text: s.description)),
             ]),
             const SizedBox(height: 10),
             Text(s.name,
@@ -751,9 +791,15 @@ class ProductCard extends StatelessWidget {
                                 color: pal.bg,
                                 borderRadius: BorderRadius.circular(10),
                                 child: InkWell(
+                                  // Havola web sahifani ochadi — qabul qilgan
+                                  // odam o'sha yerdan buyurtma bera oladi
                                   onTap: () => Share.share(
-                                      "${p.name} — ${fmtPrice(p.price)} so'm\nhttps://t.me/$botUsername?startapp=p_${p.id}",
+                                      "${p.name} — ${fmtPrice(p.price)} so'm\n${productLink(p.id)}",
                                       subject: p.name),
+                                  onLongPress: () async {
+                                    await Clipboard.setData(ClipboardData(text: productLink(p.id)));
+                                    if (context.mounted) showToast(context, tr('Havola nusxalandi'));
+                                  },
                                   borderRadius: BorderRadius.circular(10),
                                   child: SizedBox(
                                       width: 30,

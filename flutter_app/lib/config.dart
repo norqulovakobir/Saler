@@ -36,3 +36,16 @@ const appVersion = String.fromEnvironment('APP_VERSION', defaultValue: '1.0.0');
 
 /// Bot username (@ belgisisiz) — Telegram havolalari uchun.
 const botUsername = String.fromEnvironment('BOT_USERNAME', defaultValue: 'saler_ai_bot');
+
+/// Ulashish havolalarining manzili. Worker `/p/<id>` va `/s/<id>` sahifalarini
+/// og: teglari bilan beradi — havola Telegram va WhatsApp'da rasm, nom va narx
+/// ko'rsatilgan kartochka bo'lib chiqadi, bosilganda esa web ilovaga o'tadi.
+final shareBase = const String.fromEnvironment('SHARE_BASE').isNotEmpty
+    ? const String.fromEnvironment('SHARE_BASE').replaceAll(RegExp(r'/+$'), '')
+    : apiBase;
+
+/// Mahsulot havolasi: ulashish uchun
+String productLink(String id) => '$shareBase/p/${Uri.encodeComponent(id)}';
+
+/// Do'kon havolasi: ulashish uchun
+String shopLink(String id) => '$shareBase/s/${Uri.encodeComponent(id)}';

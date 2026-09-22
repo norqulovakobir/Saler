@@ -1,5 +1,5 @@
 import {
-  HttpError, REGIONS, all, body, bool, checkCode, checkPassword, cleanPhotoRefs, consumeCode, cors, distanceKm,
+  HttpError, REGIONS, all, body, bool, checkCode, checkPassword, cleanPhotoRefs, consumeCode, cors, distanceKm, escapeHtml,
   hashPassword, json, loadContext, mediaResponse, needBuyer, needCourier, needEmail, needLogin, needPassword,
   needPhone, needShop, needTelegram, newId, newToken, notifyShop, now, num, one, parseJson, parseList, personName,
   publicUser, regionRouteKm, run, sendCode, serializeCargo, serializeCourier, serializeOrder, serializeProduct,
@@ -1754,6 +1754,89 @@ async function api(request, env, execution, url) {
   throw new HttpError(404, "Yo'l topilmadi");
 }
 
+/// Ulashish havolasi ochilganda ko'rsatiladigan sahifa.
+///
+/// Telegram, WhatsApp va ijtimoiy tarmoqlar havolani ochmasdan turib uning
+/// og: teglarini o'qiydi — shuning uchun mahsulot nomi, narxi va rasmi
+/// serverda, HTML ichida beriladi: havola suhbatda kartochka bo'lib chiqadi.
+/// Odam bosganda esa ilovaning web versiyasiga o'tkaziladi va u yerdan
+/// to'g'ridan to'g'ri buyurtma bera oladi.
+function shareLanding(env, url, { title, description, image, target }) {
+  const webBase = str(env.WEB_BASE || 'https://saler-web.onrender.com').replace(/\/+$/, '');
+  const link = webBase + target;
+  const photo = image ? `${url.origin}/api/photo/${encodeURIComponent(image)}` : `${webBase}/icons/Icon-512.png`;
+  const html = `<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)}</title>
+<meta name="description" content="${escapeHtml(description)}">
+<meta property="og:type" content="product">
+<meta property="og:site_name" content="Rydex">
+<meta property="og:title" content="${escapeHtml(title)}">
+<meta property="og:description" content="${escapeHtml(description)}">
+<meta property="og:image" content="${escapeHtml(photo)}">
+<meta property="og:url" content="${escapeHtml(link)}">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="${escapeHtml(link)}">
+<style>
+  :root{color-scheme:light}
+  body{margin:0;background:#FFFDF5;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#14161A;
+       display:flex;min-height:100vh;align-items:center;justify-content:center;padding:24px}
+  .card{max-width:420px;width:100%;background:#fff;border:1px solid #F0E6C0;border-radius:24px;padding:22px;
+        box-shadow:0 14px 40px rgba(20,22,26,.07);text-align:center}
+  img{width:100%;max-height:300px;object-fit:contain;border-radius:16px;background:#F7F8FA}
+  h1{font-size:20px;margin:16px 0 6px;letter-spacing:-.4px}
+  p{margin:0;color:#6B7280;font-size:14px}
+  a{display:block;margin-top:18px;background:#FEDD06;color:#111;text-decoration:none;font-weight:800;
+    padding:16px;border-radius:16px}
+</style>
+</head>
+<body>
+  <div class="card">
+    <img src="${escapeHtml(photo)}" alt="${escapeHtml(title)}">
+    <h1>${escapeHtml(title)}</h1>
+    <p>${escapeHtml(description)}</p>
+    <a href="${escapeHtml(link)}">Ochish va buyurtma berish</a>
+  </div>
+  <script>location.replace(${JSON.stringify(link)});</script>
+</body>
+</html>`;
+  return new Response(html, {
+    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=300' },
+  });
+}
+
+async function shareRoute(env, url, path) {
+  let match;
+  if ((match = path.match(/^\/p\/([^/]+)$/))) {
+    const id = decodeURIComponent(match[1]);
+    const product = await one(env, 'SELECT * FROM products WHERE id=?', [id]);
+    if (!product) throw new HttpError(404, 'Mahsulot topilmadi');
+    const shop = await getShop(env, product.shop_id);
+    const photos = parseList(product.photos);
+    return shareLanding(env, url, {
+      title: str(product.name),
+      description: `${num(product.price).toLocaleString('ru-RU')} so'm${shop ? ' · ' + str(shop.name) : ''}`,
+      image: photos[0] || null,
+      target: `/p/${encodeURIComponent(id)}`,
+    });
+  }
+  if ((match = path.match(/^\/s\/([^/]+)$/))) {
+    const id = decodeURIComponent(match[1]);
+    const shop = await getShop(env, id);
+    if (!shop) throw new HttpError(404, "Do'kon topilmadi");
+    return shareLanding(env, url, {
+      title: str(shop.name),
+      description: str(shop.description) || 'Rydex do\'koni',
+      image: shop.photo || shop.logo || null,
+      target: `/s/${encodeURIComponent(id)}`,
+    });
+  }
+  return null;
+}
+
 export default {
   async fetch(request, env, execution) {
     // HTTP 204 responses are not allowed to contain a body. Returning JSON here
@@ -1763,6 +1846,11 @@ export default {
     try {
       if (url.pathname === '/' || url.pathname === '/health' || url.pathname === '/api/health') {
         return json({ ok: true, service: 'Saler AI API', database: Boolean(env.DB), email: Boolean(env.BREVO_API_KEY) });
+      }
+      // Ulashish havolalari: /p/<mahsulot> va /s/<do'kon>
+      if (request.method === 'GET' && !url.pathname.startsWith('/api/')) {
+        const shared = await shareRoute(env, url, url.pathname);
+        if (shared) return shared;
       }
       if (!url.pathname.startsWith('/api/')) throw new HttpError(404, "Yo'l topilmadi");
       return await api(request, env, execution, url);
