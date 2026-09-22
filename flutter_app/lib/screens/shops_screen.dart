@@ -822,7 +822,9 @@ class _ProductScreenState extends State<ProductScreen> {
                                   EdgeInsets.fromLTRB(16, top + 64, 16, 40),
                               child: Image.network(
                                   Api.instance.photoUrl(p.photos[i]),
-                                  fit: BoxFit.contain)),
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (_, __, ___) => Icon(Icons.image_not_supported_outlined,
+                                      color: context.p.muted, size: 42))),
                         ),
                     ],
                   ),
@@ -1035,7 +1037,10 @@ class _Lightbox extends StatelessWidget {
             PageView(controller: PageController(initialPage: index), children: [
           for (final r in photos)
             InteractiveViewer(
-                child: Center(child: Image.network(Api.instance.photoUrl(r))))
+                child: Center(
+                    child: Image.network(Api.instance.photoUrl(r),
+                        errorBuilder: (_, __, ___) =>
+                            Icon(Icons.image_not_supported_outlined, color: context.p.muted, size: 42))))
         ]),
       );
 }

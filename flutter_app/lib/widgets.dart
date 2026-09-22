@@ -461,17 +461,21 @@ class ShopAvatar extends StatelessWidget {
               : null),
       clipBehavior: Clip.antiAlias,
       child: shop.logo != null
-          ? Image.network(Api.instance.photoUrl(shop.logo!), fit: BoxFit.cover)
-          : Container(
-              color: c,
-              alignment: Alignment.center,
-              child: Text(initials(shop.name),
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                      fontSize: size * .36))),
+          // Logo ochilmasa (o'chirilgan yoki buzuq rasm) — harflar ko'rinadi,
+          // qizil xato emas
+          ? Image.network(Api.instance.photoUrl(shop.logo!),
+              fit: BoxFit.cover, errorBuilder: (_, __, ___) => _initialsBox(c, shop.name, size))
+          : _initialsBox(c, shop.name, size),
     );
   }
+
+  /// Logo o'rnini bosuvchi: do'kon nomining bosh harflari
+  static Widget _initialsBox(Color c, String name, double size) => Container(
+        color: c,
+        alignment: Alignment.center,
+        child: Text(initials(name),
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: size * .36)),
+      );
 }
 
 /// Do'kon kartochkasi (bosh sahifa)
@@ -522,7 +526,10 @@ class ShopCard extends StatelessWidget {
                                 opacity: .7,
                                 child: Image.network(
                                     Api.instance.photoUrl(s.logo!),
-                                    fit: BoxFit.cover))),
+                                    fit: BoxFit.cover,
+                                    // Fon rasmi ochilmasa oddiy rang qoladi
+                                    errorBuilder: (_, __, ___) =>
+                                        ColoredBox(color: p.imageA)))),
                         Center(
                             child: Container(
                                 padding: const EdgeInsets.all(3),

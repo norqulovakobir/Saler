@@ -769,7 +769,15 @@ void openProductForm(BuildContext context, Product? p, VoidCallback onSaved) {
                       borderRadius: BorderRadius.circular(12),
                       child: photos[i].startsWith('data:')
                           ? Image.memory(base64Decode(photos[i].split(',')[1]), width: 72, height: 72, fit: BoxFit.cover)
-                          : Image.network(Api.instance.photoUrl(photos[i]), width: 72, height: 72, fit: BoxFit.cover)),
+                          : Image.network(Api.instance.photoUrl(photos[i]),
+                              width: 72,
+                              height: 72,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Container(
+                                  width: 72,
+                                  height: 72,
+                                  color: pal.imageA,
+                                  child: Icon(Icons.image_not_supported_outlined, color: pal.muted, size: 22)))),
                   Positioned(
                       top: 4,
                       right: 4,
@@ -1470,7 +1478,13 @@ class _InstagramSellerInsightsState extends State<_InstagramSellerInsights> {
           if (photo != null && photo.isNotEmpty)
             ClipRRect(
               borderRadius: BorderRadius.circular(18),
-              child: SizedBox(height: 180, child: Image.network(Api.instance.photoUrl(photo), fit: BoxFit.cover)),
+              child: SizedBox(
+                  height: 180,
+                  child: Image.network(Api.instance.photoUrl(photo),
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => ColoredBox(
+                          color: p.imageA,
+                          child: Icon(Icons.image_not_supported_outlined, color: p.muted, size: 42)))),
             )
           else
             Container(height: 120, decoration: BoxDecoration(color: p.bg, borderRadius: BorderRadius.circular(18)), child: Icon(Icons.inventory_2_outlined, color: p.muted, size: 42)),
@@ -1578,7 +1592,10 @@ class _InstagramSellerInsightsState extends State<_InstagramSellerInsights> {
                     borderRadius: BorderRadius.circular(12),
                     child: Stack(fit: StackFit.expand, children: [
                       if (photo != null && photo.isNotEmpty)
-                        Image.network(Api.instance.photoUrl(photo), fit: BoxFit.cover)
+                        Image.network(Api.instance.photoUrl(photo),
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) =>
+                                ColoredBox(color: p.imageA, child: Icon(Icons.inventory_2_outlined, color: p.muted)))
                       else
                         Icon(Icons.inventory_2_outlined, color: p.muted),
                       const DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0x00000000), Color(0xAA000000)]))),

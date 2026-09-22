@@ -269,6 +269,23 @@ function imageBuffer(value) {
   throw new HttpError(400, "Rasm ma'lumoti noto'g'ri");
 }
 
+/// D1 ga BLOB yozishning ishonchli yagona shakli — sonlar massivi.
+/// `ArrayBuffer` bog'langanda qator yaratiladi-yu, `data` bo'sh saqlanadi:
+/// rasm keyin 200 bilan 0 bayt bo'lib qaytadi va ilova uni ocha olmaydi.
+function blobParam(buffer) {
+  return Array.from(new Uint8Array(buffer));
+}
+
+/// D1 dan qaytgan BLOB: yangi yozuvlar sonlar massivi, eskilari
+/// ArrayBuffer yoki typed array bo'lishi mumkin — hammasi baytga keltiriladi.
+function blobBytes(value) {
+  if (value == null) return null;
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  if (Array.isArray(value)) return Uint8Array.from(value);
+  return null;
+}
+
 function validImageMime(value) {
   const mime = str(value).toLowerCase().split(';')[0].trim();
   if (!IMAGE_EXTENSIONS[mime]) throw new HttpError(400, 'JPEG, PNG, WebP, AVIF yoki GIF rasm yuklang', { field: 'image' });
@@ -313,8 +330,16 @@ export async function storeImageBytes(env, value, mime, { maxBytes = 4 * 1024 * 
   }
 
   await run(env, 'INSERT INTO media(ref, mime, data, bytes, created_at) VALUES(?,?,?,?,?)', [
-    ref, imageMime, bytes, bytes.byteLength, now(),
+    ref, imageMime, blobParam(bytes), bytes.byteLength, now(),
   ]);
+  // Yozilganini darhol tekshiramiz: bo'sh BLOB saqlanib qolsa, rasm keyin
+  // "bor, lekin ochilmaydi" holatiga tushadi — buni yuklash paytida bilgan
+  // afzal, chunki foydalanuvchi shu zahoti qayta urinib ko'ra oladi.
+  const saved = await one(env, 'SELECT bytes, LENGTH(data) AS stored FROM media WHERE ref=?', [ref]);
+  if (!saved || num(saved.stored) !== bytes.byteLength) {
+    await run(env, 'DELETE FROM media WHERE ref=?', [ref]);
+    throw new HttpError(502, "Rasmni saqlab bo'lmadi. Qayta urinib ko'ring");
+  }
   return ref;
 }
 
@@ -382,7 +407,11 @@ export async function mediaResponse(env, ref, request = null, execution = null) 
 
   const file = await one(env, 'SELECT mime, data FROM media WHERE ref=?', [ref]);
   if (!file) throw new HttpError(404, 'Rasm topilmadi');
-  return new Response(file.data, { headers: mediaHeaders(file.mime) });
+  const data = blobBytes(file.data);
+  // Bo'sh BLOB bo'lsa 200 bilan 0 bayt qaytarmaymiz: brauzer buni buzuq rasm
+  // deb qabul qiladi va ilova xato tashlaydi. 404 da ilova o'z o'rnini ko'rsatadi.
+  if (!data || !data.byteLength) throw new HttpError(404, 'Rasm topilmadi');
+  return new Response(data, { headers: mediaHeaders(file.mime) });
 }
 
 function emailHtml({ name, code, purpose }) {
