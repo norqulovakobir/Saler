@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS media_uploads (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   mime TEXT NOT NULL,
   bytes INTEGER NOT NULL,
-  storage TEXT NOT NULL CHECK(storage IN ('r2', 'd1')),
+  storage TEXT NOT NULL CHECK(storage IN ('r2', 'sb', 'd1')),
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS media_uploads_user_created_idx ON media_uploads(user_id, created_at DESC);

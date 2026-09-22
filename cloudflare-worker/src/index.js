@@ -4,7 +4,7 @@ import {
   needPhone, needShop, needTelegram, newId, newToken, notifyShop, now, num, one, parseJson, parseList, personName,
   publicUser, regionRouteKm, run, sendCode, serializeCargo, serializeCourier, serializeOrder, serializeProduct,
   isMediaRef,
-  r2Enabled, serializeShop, shopWithStats, storeDataUri, storeImageBytes, str, tariffPrice,
+  r2Enabled, supabaseEnabled, serializeShop, shopWithStats, storeDataUri, storeImageBytes, str, tariffPrice,
 } from './lib.js';
 
 const SHOP_STATS = `SELECT s.*,
@@ -110,12 +110,19 @@ async function cleanupStaleGuestData(env) {
 const MAX_DIRECT_IMAGE_BYTES = 4 * 1024 * 1024;
 const MAX_D1_IMAGE_BYTES = 900 * 1024;
 
+/// Rasmlar bazadan tashqarida (R2 yoki Supabase Storage) saqlanadimi.
+/// D1 BLOB — oxirgi chora: uning bepul chegarasi atigi 500 MB.
+const objectStore = (env) => r2Enabled(env) || supabaseEnabled(env);
+
+/// Hozir qaysi ombor ishlayotgani: media_uploads jadvali va /api/health uchun
+const mediaStoreName = (env) => (r2Enabled(env) ? 'r2' : supabaseEnabled(env) ? 'sb' : 'd1');
+
 async function takeMediaQuota(env, context, bytes) {
   const privileged = Boolean(context.user.registered_at || context.shop || context.courier);
-  const usingR2 = r2Enabled(env);
-  // R2 ulanmaguncha D1 faqat kichik fallback rasmlar uchun ishlatiladi.
-  const maxFiles = usingR2 ? (privileged ? 60 : 6) : (privileged ? 12 : 4);
-  const maxBytes = usingR2 ? (privileged ? 30 * 1024 * 1024 : 4 * 1024 * 1024) : (privileged ? 8 * 1024 * 1024 : 2 * 1024 * 1024);
+  const external = objectStore(env);
+  // Ombor ulanmaguncha D1 faqat kichik fallback rasmlar uchun ishlatiladi.
+  const maxFiles = external ? (privileged ? 60 : 6) : (privileged ? 12 : 4);
+  const maxBytes = external ? (privileged ? 30 * 1024 * 1024 : 4 * 1024 * 1024) : (privileged ? 8 * 1024 * 1024 : 2 * 1024 * 1024);
   const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   const used = await one(env, `SELECT COUNT(*) AS files, COALESCE(SUM(bytes),0) AS bytes
     FROM media_uploads WHERE user_id=? AND created_at>=?`, [context.user.id, cutoff]);
@@ -125,9 +132,9 @@ async function takeMediaQuota(env, context, bytes) {
 }
 
 async function uploadMedia(request, env, context) {
-  const usingR2 = r2Enabled(env);
-  const maxBytes = usingR2 ? MAX_DIRECT_IMAGE_BYTES : MAX_D1_IMAGE_BYTES;
-  const maxLabel = usingR2 ? '4 MB' : '900 KB';
+  const external = objectStore(env);
+  const maxBytes = external ? MAX_DIRECT_IMAGE_BYTES : MAX_D1_IMAGE_BYTES;
+  const maxLabel = external ? '4 MB' : '900 KB';
   const mime = str(request.headers.get('content-type')).split(';')[0].trim().toLowerCase();
   const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/avif', 'image/gif'];
   if (!allowed.includes(mime)) throw new HttpError(400, 'JPEG, PNG, WebP, AVIF yoki GIF rasm yuklang', { field: 'image' });
@@ -142,9 +149,9 @@ async function uploadMedia(request, env, context) {
   // Bu yengil indeks limit va admin statistikasi uchun. Rasmning o'zi faqat
   // R2 da, D1 esa bir necha o'n bayt metadata saqlaydi.
   await run(env, 'INSERT INTO media_uploads(ref, user_id, mime, bytes, storage, created_at) VALUES(?,?,?,?,?,?)', [
-    ref, context.user.id, mime, bytes.byteLength, r2Enabled(env) ? 'r2' : 'd1', now(),
+    ref, context.user.id, mime, bytes.byteLength, mediaStoreName(env), now(),
   ]);
-  return { ref, storage: r2Enabled(env) ? 'r2' : 'd1' };
+  return { ref, storage: mediaStoreName(env) };
 }
 
 async function sellerSignup(env, input) {
@@ -1848,9 +1855,9 @@ export default {
         // Production tekshiruvi: nimasi sozlanmaganini bitta so'rovda ko'rish uchun.
         // R2 yoqilmaganda rasmlar D1 ichida yotadi va bepul 500 MB ni to'ldiradi —
         // shuning uchun band joy ham ko'rsatiladi.
-        const usingR2 = r2Enabled(env);
-        let media = { store: usingR2 ? 'r2' : 'd1' };
-        if (!usingR2 && env.DB) {
+        const store = mediaStoreName(env);
+        let media = { store };
+        if (store === 'd1' && env.DB) {
           try {
             const used = await one(env, 'SELECT COUNT(*) AS files, COALESCE(SUM(bytes),0) AS bytes FROM media');
             const bytes = num(used && used.bytes);
