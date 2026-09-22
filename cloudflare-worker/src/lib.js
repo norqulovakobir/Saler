@@ -269,15 +269,10 @@ function imageBuffer(value) {
   throw new HttpError(400, "Rasm ma'lumoti noto'g'ri");
 }
 
-/// D1 ga BLOB yozishning ishonchli yagona shakli — sonlar massivi.
-/// `ArrayBuffer` bog'langanda qator yaratiladi-yu, `data` bo'sh saqlanadi:
-/// rasm keyin 200 bilan 0 bayt bo'lib qaytadi va ilova uni ocha olmaydi.
-function blobParam(buffer) {
-  return Array.from(new Uint8Array(buffer));
-}
-
-/// D1 dan qaytgan BLOB: yangi yozuvlar sonlar massivi, eskilari
-/// ArrayBuffer yoki typed array bo'lishi mumkin — hammasi baytga keltiriladi.
+/// D1 dan qaytgan BLOB sonlar massivi bo'ladi (ArrayBuffer emas). Uni to'g'ridan
+/// to'g'ri `new Response(...)` ga bersak, tana bo'sh chiqadi: rasm 200 va to'g'ri
+/// Content-Type bilan, lekin 0 bayt bo'lib keladi va ilova uni ocha olmaydi.
+/// Shuning uchun har qanday ko'rinishdagi qiymat baytlarga keltiriladi.
 function blobBytes(value) {
   if (value == null) return null;
   if (value instanceof ArrayBuffer) return new Uint8Array(value);
@@ -329,13 +324,14 @@ export async function storeImageBytes(env, value, mime, { maxBytes = 4 * 1024 * 
     return `r2:${key}`;
   }
 
+  // D1 BLOB uchun ArrayBuffer bog'lanadi (hujjatlardagi shakl).
   await run(env, 'INSERT INTO media(ref, mime, data, bytes, created_at) VALUES(?,?,?,?,?)', [
-    ref, imageMime, blobParam(bytes), bytes.byteLength, now(),
+    ref, imageMime, bytes, bytes.byteLength, now(),
   ]);
-  // Yozilganini darhol tekshiramiz: bo'sh BLOB saqlanib qolsa, rasm keyin
-  // "bor, lekin ochilmaydi" holatiga tushadi — buni yuklash paytida bilgan
-  // afzal, chunki foydalanuvchi shu zahoti qayta urinib ko'ra oladi.
-  const saved = await one(env, 'SELECT bytes, LENGTH(data) AS stored FROM media WHERE ref=?', [ref]);
+  // Yozilganini darhol tekshiramiz: to'liq saqlanmasa rasm keyin "bor, lekin
+  // ochilmaydi" holatiga tushadi — buni yuklash paytida bilgan afzal, chunki
+  // foydalanuvchi shu zahoti qayta urinib ko'ra oladi.
+  const saved = await one(env, 'SELECT LENGTH(data) AS stored FROM media WHERE ref=?', [ref]);
   if (!saved || num(saved.stored) !== bytes.byteLength) {
     await run(env, 'DELETE FROM media WHERE ref=?', [ref]);
     throw new HttpError(502, "Rasmni saqlab bo'lmadi. Qayta urinib ko'ring");
