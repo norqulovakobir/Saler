@@ -4,9 +4,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
-import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import '../../api.dart';
+import '../../photo.dart';
 import '../../l10n.dart';
 import '../../models.dart';
 import '../../realtime.dart';
@@ -259,7 +259,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final src = await askImageSource(context);
     if (src == null) return;
     try {
-      final f = await ImagePicker().pickImage(source: src, maxWidth: 512, imageQuality: 85);
+      final f = await PhotoPick.logo(src);
       if (f == null) return;
       final data = await Api.instance.uploadImage(
         await f.readAsBytes(),

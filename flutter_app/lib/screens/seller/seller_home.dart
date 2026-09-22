@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../api.dart';
+import '../../photo.dart';
 import '../../categories.dart';
 import '../../l10n.dart';
 import '../../main.dart';
@@ -793,10 +794,10 @@ void openProductForm(BuildContext context, Product? p, VoidCallback onSaved) {
                     try {
                       final List<XFile> files;
                       if (src == ImageSource.camera) {
-                        final f = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 1280, imageQuality: 85);
+                        final f = await PhotoPick.product(ImageSource.camera);
                         files = f == null ? [] : [f];
                       } else {
-                        files = await ImagePicker().pickMultiImage(maxWidth: 1280, imageQuality: 85);
+                        files = await PhotoPick.products();
                       }
                       for (final f in files.take(10 - photos.length)) {
                         photos.add(await Api.instance.uploadImage(
@@ -993,7 +994,7 @@ class ProfileTab extends StatelessWidget {
                     onPressed: () async {
                       final src = await askImageSource(context);
                       if (src == null) return;
-                      final f = await ImagePicker().pickImage(source: src, maxWidth: 512, imageQuality: 85);
+                      final f = await PhotoPick.logo(src);
                       if (f == null) return;
                       try {
                         final logo = await Api.instance.uploadImage(

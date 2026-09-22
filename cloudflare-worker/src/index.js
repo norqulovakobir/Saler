@@ -1845,15 +1845,33 @@ export default {
     const url = new URL(request.url);
     try {
       if (url.pathname === '/' || url.pathname === '/health' || url.pathname === '/api/health') {
-        // Production tekshiruvi: nimasi sozlanmaganini bitta so'rovda ko'rish uchun
+        // Production tekshiruvi: nimasi sozlanmaganini bitta so'rovda ko'rish uchun.
+        // R2 yoqilmaganda rasmlar D1 ichida yotadi va bepul 500 MB ni to'ldiradi —
+        // shuning uchun band joy ham ko'rsatiladi.
+        const usingR2 = r2Enabled(env);
+        let media = { store: usingR2 ? 'r2' : 'd1' };
+        if (!usingR2 && env.DB) {
+          try {
+            const used = await one(env, 'SELECT COUNT(*) AS files, COALESCE(SUM(bytes),0) AS bytes FROM media');
+            const bytes = num(used && used.bytes);
+            const limit = 500 * 1024 * 1024; // D1 bepul chegarasi
+            media = {
+              store: 'd1',
+              files: num(used && used.files),
+              usedMb: Math.round((bytes / 1024 / 1024) * 10) / 10,
+              limitMb: 500,
+              percent: Math.round((bytes / limit) * 1000) / 10,
+            };
+          } catch (_) { /* jadval hali yo'q bo'lishi mumkin */ }
+        }
         return json({
           ok: true,
           service: 'Saler AI API',
           database: Boolean(env.DB),
           email: Boolean(env.BREVO_API_KEY && env.BREVO_SENDER_EMAIL),
           emailSender: Boolean(env.BREVO_SENDER_EMAIL),
-          media: r2Enabled(env) ? 'r2' : 'd1',
           admin: Boolean(env.ADMIN_PASSWORD),
+          media,
         });
       }
       // Ulashish havolalari: /p/<mahsulot> va /s/<do'kon>
