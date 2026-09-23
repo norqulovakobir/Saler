@@ -117,7 +117,7 @@ class ThemeBtn extends StatelessWidget {
                     ThemeMode.dark: "Qorong'i"
                   }[next]}'),
                   duration: const Duration(seconds: 1),
-                  margin: const EdgeInsets.fromLTRB(16, 0, 16, 100)));
+                  margin: const EdgeInsets.fromLTRB(16, 0, 16, 16)));
           });
         },
       );

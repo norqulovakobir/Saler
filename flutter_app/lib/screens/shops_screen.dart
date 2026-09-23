@@ -912,7 +912,7 @@ class _ProductScreenState extends State<ProductScreen> {
                   color: pal.bg,
                   borderRadius:
                       const BorderRadius.vertical(top: Radius.circular(28))),
-              padding: const EdgeInsets.fromLTRB(20, 22, 20, 110),
+              padding: const EdgeInsets.fromLTRB(20, 22, 20, 28),
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [

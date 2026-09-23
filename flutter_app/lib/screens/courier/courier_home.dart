@@ -163,7 +163,6 @@ class _CourierHomeState extends State<CourierHome> {
           if (nav != null && nav.canPop()) nav.pop();
         },
         child: Scaffold(
-          extendBody: true,
           body: PageView(
             controller: pager,
             // Xarita tabida yonga surish xaritaning o'ziga tegishli
