@@ -251,12 +251,11 @@ const immutableMediaCache = 'public, max-age=31536000, immutable';
 /// ishlatib yuborishning oldini oladi.
 export function isMediaRef(value) {
   const ref = str(value).trim();
-  return /^ph_[A-Za-z0-9_-]{12,}$/.test(ref)
-    || /^r2:images\/\d{4}\/\d{2}\/ph_[A-Za-z0-9_-]{12,}\.(?:jpg|png|webp|avif|gif)$/.test(ref);
+  return /^r2:images\/\d{4}\/\d{2}\/ph_[A-Za-z0-9_-]{12,}\.(?:jpg|png|webp|avif|gif)$/.test(ref);
 }
 
-/// Cloudflare R2 binding mavjud bo'lsa yangi media D1 BLOB o'rniga R2 ga yoziladi.
-/// Binding bo'lmaganda eski D1 oqimi ishlaydi — deploy va eski rasmlar buzilmaydi.
+/// Rasmlar faqat R2 da saqlanadi. Binding yo'q bo'lsa yuklash to'xtaydi —
+/// jimgina D1 ga yozib, uning 5 GB ini rasmlar bilan to'ldirmaslik uchun.
 export const r2Enabled = (env) => Boolean(
   env && env.MEDIA && typeof env.MEDIA.put === 'function' && typeof env.MEDIA.get === 'function',
 );
@@ -267,18 +266,6 @@ function imageBuffer(value) {
     return value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
   }
   throw new HttpError(400, "Rasm ma'lumoti noto'g'ri");
-}
-
-/// D1 dan qaytgan BLOB sonlar massivi bo'ladi (ArrayBuffer emas). Uni to'g'ridan
-/// to'g'ri `new Response(...)` ga bersak, tana bo'sh chiqadi: rasm 200 va to'g'ri
-/// Content-Type bilan, lekin 0 bayt bo'lib keladi va ilova uni ocha olmaydi.
-/// Shuning uchun har qanday ko'rinishdagi qiymat baytlarga keltiriladi.
-function blobBytes(value) {
-  if (value == null) return null;
-  if (value instanceof ArrayBuffer) return new Uint8Array(value);
-  if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-  if (Array.isArray(value)) return Uint8Array.from(value);
-  return null;
 }
 
 function validImageMime(value) {
@@ -308,35 +295,20 @@ export async function storeImageBytes(env, value, mime, { maxBytes = 4 * 1024 * 
     throw new HttpError(400, `Rasm juda katta (maks ${Math.floor(maxBytes / 1024 / 1024)} MB)`, { field: 'image' });
   }
 
-  const ref = newId('ph_');
-  if (r2Enabled(env)) {
-    const key = r2Key(ref, imageMime);
-    try {
-      await env.MEDIA.put(key, bytes, {
-        httpMetadata: { contentType: imageMime, cacheControl: immutableMediaCache },
-      });
-    } catch (error) {
-      console.error('R2 media upload error', error);
-      throw new HttpError(502, 'Rasm omboriga yuklab bo\'lmadi. Keyinroq urinib ko\'ring');
-    }
-    // Kalitni ma'lumotlar jadvalida saqlash shart emas: ref ichida R2 kaliti
-    // bor. Shunday qilib D1 faqat biznes ma'lumotlari uchun qoladi.
-    return `r2:${key}`;
-  }
+  if (!r2Enabled(env)) throw new HttpError(503, 'Rasm ombori ulanmagan');
 
-  // D1 BLOB uchun ArrayBuffer bog'lanadi (hujjatlardagi shakl).
-  await run(env, 'INSERT INTO media(ref, mime, data, bytes, created_at) VALUES(?,?,?,?,?)', [
-    ref, imageMime, bytes, bytes.byteLength, now(),
-  ]);
-  // Yozilganini darhol tekshiramiz: to'liq saqlanmasa rasm keyin "bor, lekin
-  // ochilmaydi" holatiga tushadi — buni yuklash paytida bilgan afzal, chunki
-  // foydalanuvchi shu zahoti qayta urinib ko'ra oladi.
-  const saved = await one(env, 'SELECT LENGTH(data) AS stored FROM media WHERE ref=?', [ref]);
-  if (!saved || num(saved.stored) !== bytes.byteLength) {
-    await run(env, 'DELETE FROM media WHERE ref=?', [ref]);
-    throw new HttpError(502, "Rasmni saqlab bo'lmadi. Qayta urinib ko'ring");
+  const key = r2Key(newId('ph_'), imageMime);
+  try {
+    await env.MEDIA.put(key, bytes, {
+      httpMetadata: { contentType: imageMime, cacheControl: immutableMediaCache },
+    });
+  } catch (error) {
+    console.error('R2 media upload error', error);
+    throw new HttpError(502, 'Rasm omboriga yuklab bo\'lmadi. Keyinroq urinib ko\'ring');
   }
-  return ref;
+  // Kalitni ma'lumotlar jadvalida saqlash shart emas: ref ichida R2 kaliti
+  // bor. Shunday qilib D1 faqat biznes ma'lumotlari uchun qoladi.
+  return `r2:${key}`;
 }
 
 export async function storeDataUri(env, value, { maxBytes = 900 * 1024 } = {}) {
@@ -401,13 +373,8 @@ export async function mediaResponse(env, ref, request = null, execution = null) 
     return response;
   }
 
-  const file = await one(env, 'SELECT mime, data FROM media WHERE ref=?', [ref]);
-  if (!file) throw new HttpError(404, 'Rasm topilmadi');
-  const data = blobBytes(file.data);
-  // Bo'sh BLOB bo'lsa 200 bilan 0 bayt qaytarmaymiz: brauzer buni buzuq rasm
-  // deb qabul qiladi va ilova xato tashlaydi. 404 da ilova o'z o'rnini ko'rsatadi.
-  if (!data || !data.byteLength) throw new HttpError(404, 'Rasm topilmadi');
-  return new Response(data, { headers: mediaHeaders(file.mime) });
+  // Faqat r2: shaklidagi ref qoladi — eski D1 BLOB'lari R2 ga ko'chirilgan.
+  throw new HttpError(404, 'Rasm topilmadi');
 }
 
 function emailHtml({ name, code, purpose }) {

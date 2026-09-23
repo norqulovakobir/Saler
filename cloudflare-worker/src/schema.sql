@@ -49,16 +49,6 @@ CREATE TABLE IF NOT EXISTS email_codes (
   PRIMARY KEY (email, purpose)
 );
 
--- Eski rasmlar uchun D1 fallback. MEDIA R2 binding ulanganidan keyin yangi
--- rasmlar R2 ga ketadi; bu jadval faqat oldingi/fallback BLOB'lar uchun qoladi.
-CREATE TABLE IF NOT EXISTS media (
-  ref TEXT PRIMARY KEY,
-  mime TEXT NOT NULL,
-  data BLOB NOT NULL,
-  bytes INTEGER NOT NULL,
-  created_at TEXT NOT NULL
-);
-
 -- Rasmning o'zi emas, uning hajmi va egasi haqidagi kichik metadata.
 -- Guest upload limitini va R2 oqimini nazorat qilish uchun ishlatiladi.
 CREATE TABLE IF NOT EXISTS media_uploads (

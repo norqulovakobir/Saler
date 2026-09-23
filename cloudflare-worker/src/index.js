@@ -108,21 +108,15 @@ async function cleanupStaleGuestData(env) {
 }
 
 const MAX_DIRECT_IMAGE_BYTES = 4 * 1024 * 1024;
-const MAX_D1_IMAGE_BYTES = 900 * 1024;
 
-/// Rasmlar bazadan tashqarida (Cloudflare R2) saqlanadimi.
-/// D1 BLOB — oxirgi chora: uning bepul chegarasi atigi 500 MB.
-const objectStore = (env) => r2Enabled(env);
-
-/// Hozir qaysi ombor ishlayotgani: media_uploads jadvali va /api/health uchun
-const mediaStoreName = (env) => (r2Enabled(env) ? 'r2' : 'd1');
+/// Hozir qaysi ombor ishlayotgani: media_uploads jadvali va /api/health uchun.
+/// R2 binding yo'qolsa 'off' — yuklash storeImageBytes'da 503 bilan to'xtaydi.
+const mediaStoreName = (env) => (r2Enabled(env) ? 'r2' : 'off');
 
 async function takeMediaQuota(env, context, bytes) {
   const privileged = Boolean(context.user.registered_at || context.shop || context.courier);
-  const external = objectStore(env);
-  // Ombor ulanmaguncha D1 faqat kichik fallback rasmlar uchun ishlatiladi.
-  const maxFiles = external ? (privileged ? 60 : 6) : (privileged ? 12 : 4);
-  const maxBytes = external ? (privileged ? 30 * 1024 * 1024 : 4 * 1024 * 1024) : (privileged ? 8 * 1024 * 1024 : 2 * 1024 * 1024);
+  const maxFiles = privileged ? 60 : 6;
+  const maxBytes = privileged ? 30 * 1024 * 1024 : 4 * 1024 * 1024;
   const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   const used = await one(env, `SELECT COUNT(*) AS files, COALESCE(SUM(bytes),0) AS bytes
     FROM media_uploads WHERE user_id=? AND created_at>=?`, [context.user.id, cutoff]);
@@ -132,9 +126,8 @@ async function takeMediaQuota(env, context, bytes) {
 }
 
 async function uploadMedia(request, env, context) {
-  const external = objectStore(env);
-  const maxBytes = external ? MAX_DIRECT_IMAGE_BYTES : MAX_D1_IMAGE_BYTES;
-  const maxLabel = external ? '4 MB' : '900 KB';
+  const maxBytes = MAX_DIRECT_IMAGE_BYTES;
+  const maxLabel = '4 MB';
   const mime = str(request.headers.get('content-type')).split(';')[0].trim().toLowerCase();
   const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/avif', 'image/gif'];
   if (!allowed.includes(mime)) throw new HttpError(400, 'JPEG, PNG, WebP, AVIF yoki GIF rasm yuklang', { field: 'image' });
@@ -1529,7 +1522,8 @@ async function adminSystem(env) {
   const [tables, objects, media] = await Promise.all([
     one(env, "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table'"),
     one(env, 'SELECT (SELECT COUNT(*) FROM shops)+(SELECT COUNT(*) FROM products)+(SELECT COUNT(*) FROM orders)+(SELECT COUNT(*) FROM users)+(SELECT COUNT(*) FROM couriers) AS n'),
-    one(env, 'SELECT COUNT(*) AS files, COALESCE(SUM(bytes),0) AS bytes FROM media'),
+    // Rasmning o'zi R2 da; hajm va soni media_uploads metadatasidan olinadi.
+    one(env, 'SELECT COUNT(*) AS files, COALESCE(SUM(bytes),0) AS bytes FROM media_uploads'),
   ]);
   return {
     time: now(), uptime: 0, node: 'Cloudflare Workers', memory: { rss: 0, heapUsed: 0, heapTotal: 0 },
@@ -1537,7 +1531,7 @@ async function adminSystem(env) {
     uploads: {
       files: num(media.files),
       bytes: num(media.bytes),
-      storage: r2Enabled(env) ? 'Cloudflare R2 + edge cache (D1 legacy)' : 'D1 (R2 ulanmagan)',
+      storage: r2Enabled(env) ? 'Cloudflare R2 + edge cache' : 'R2 ulanmagan',
     },
     bot: null, email: { provider: 'Brevo', enabled: Boolean(env.BREVO_API_KEY), devCodes: false },
     env: { groqModel: 'Free rule-based assistant', visionModel: '—', redis: false, port: 'Cloudflare', webappUrl: null },
@@ -1937,24 +1931,7 @@ export default {
     try {
       if (url.pathname === '/' || url.pathname === '/health' || url.pathname === '/api/health') {
         // Production tekshiruvi: nimasi sozlanmaganini bitta so'rovda ko'rish uchun.
-        // R2 yoqilmaganda rasmlar D1 ichida yotadi va bepul 500 MB ni to'ldiradi —
-        // shuning uchun band joy ham ko'rsatiladi.
-        const store = mediaStoreName(env);
-        let media = { store };
-        if (store === 'd1' && env.DB) {
-          try {
-            const used = await one(env, 'SELECT COUNT(*) AS files, COALESCE(SUM(bytes),0) AS bytes FROM media');
-            const bytes = num(used && used.bytes);
-            const limit = 500 * 1024 * 1024; // D1 bepul chegarasi
-            media = {
-              store: 'd1',
-              files: num(used && used.files),
-              usedMb: Math.round((bytes / 1024 / 1024) * 10) / 10,
-              limitMb: 500,
-              percent: Math.round((bytes / limit) * 1000) / 10,
-            };
-          } catch (_) { /* jadval hali yo'q bo'lishi mumkin */ }
-        }
+        const media = { store: mediaStoreName(env) };
         return json({
           ok: true,
           service: 'Saler AI API',
