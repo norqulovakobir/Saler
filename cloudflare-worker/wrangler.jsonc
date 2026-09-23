@@ -15,6 +15,13 @@
       "enabled": true
     }
   },
+  // Rasmlar D1 BLOB o'rniga R2 ga yoziladi (lib.js: r2Enabled -> env.MEDIA).
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "saler-media"
+    }
+  ],
   "d1_databases": [
     {
       "binding": "DB",

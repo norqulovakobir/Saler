@@ -252,59 +252,7 @@ const immutableMediaCache = 'public, max-age=31536000, immutable';
 export function isMediaRef(value) {
   const ref = str(value).trim();
   return /^ph_[A-Za-z0-9_-]{12,}$/.test(ref)
-    || /^r2:images\/\d{4}\/\d{2}\/ph_[A-Za-z0-9_-]{12,}\.(?:jpg|png|webp|avif|gif)$/.test(ref)
-    || /^sb:images\/\d{4}\/\d{2}\/ph_[A-Za-z0-9_-]{12,}\.(?:jpg|png|webp|avif|gif)$/.test(ref);
-}
-
-/// Supabase Storage — R2 ga muqobil bepul ombor (1 GB, bank kartasi kerak emas).
-/// SUPABASE_URL va SUPABASE_SECRET_KEY berilsa yangi rasmlar shu yerga yoziladi.
-/// Tartib: R2 (bo'lsa) -> Supabase (bo'lsa) -> D1 BLOB (oxirgi chora).
-export const supabaseEnabled = (env) => Boolean(env && env.SUPABASE_URL && env.SUPABASE_SECRET_KEY);
-
-const supabaseBucket = (env) => str(env.SUPABASE_BUCKET) || 'photos';
-const supabaseBase = (env) => str(env.SUPABASE_URL).replace(/\/+$/, '');
-
-/// Yangi kalitlar (sb_secret_...) JWT emas — ular faqat apikey sarlavhasida
-/// yuboriladi. Eski service_role kaliti esa Authorization ni ham talab qiladi.
-function supabaseHeaders(env, extra = {}) {
-  const key = str(env.SUPABASE_SECRET_KEY);
-  const headers = { apikey: key, ...extra };
-  if (!key.startsWith('sb_')) headers.Authorization = `Bearer ${key}`;
-  return headers;
-}
-
-/// Ochiq bucket yo'q bo'lsa yaratadi. Har yuklashda chaqirilmaydi —
-/// faqat yuklash 404 bergan holatda.
-async function ensureSupabaseBucket(env) {
-  const bucket = supabaseBucket(env);
-  const response = await fetch(`${supabaseBase(env)}/storage/v1/bucket`, {
-    method: 'POST',
-    headers: supabaseHeaders(env, { 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ id: bucket, name: bucket, public: true }),
-  });
-  if (response.ok || response.status === 409) return;
-  const text = await response.text();
-  if (/already exists|duplicate/i.test(text)) return;
-  throw new HttpError(502, "Rasm omborini tayyorlab bo'lmadi");
-}
-
-async function supabaseUpload(env, key, bytes, mime) {
-  const url = `${supabaseBase(env)}/storage/v1/object/${supabaseBucket(env)}/${key}`;
-  const send = () => fetch(url, {
-    method: 'POST',
-    headers: supabaseHeaders(env, { 'Content-Type': mime, 'Cache-Control': 'max-age=31536000', 'x-upsert': 'true' }),
-    body: bytes,
-  });
-  let response = await send();
-  // Bucket hali yo'q bo'lsa bir marta yaratib, qayta urinamiz
-  if (response.status === 404) {
-    await ensureSupabaseBucket(env);
-    response = await send();
-  }
-  if (!response.ok) {
-    console.error('Supabase upload error', response.status, (await response.text()).slice(0, 200));
-    throw new HttpError(502, "Rasm omboriga yuklab bo'lmadi. Keyinroq urinib ko'ring");
-  }
+    || /^r2:images\/\d{4}\/\d{2}\/ph_[A-Za-z0-9_-]{12,}\.(?:jpg|png|webp|avif|gif)$/.test(ref);
 }
 
 /// Cloudflare R2 binding mavjud bo'lsa yangi media D1 BLOB o'rniga R2 ga yoziladi.
@@ -374,12 +322,6 @@ export async function storeImageBytes(env, value, mime, { maxBytes = 4 * 1024 * 
     // Kalitni ma'lumotlar jadvalida saqlash shart emas: ref ichida R2 kaliti
     // bor. Shunday qilib D1 faqat biznes ma'lumotlari uchun qoladi.
     return `r2:${key}`;
-  }
-
-  if (supabaseEnabled(env)) {
-    const key = r2Key(ref, imageMime);
-    await supabaseUpload(env, key, bytes, imageMime);
-    return `sb:${key}`;
   }
 
   // D1 BLOB uchun ArrayBuffer bog'lanadi (hujjatlardagi shakl).
@@ -453,34 +395,6 @@ export async function mediaResponse(env, ref, request = null, execution = null) 
     const response = new Response(object.body, { headers });
     if (cacheKey) {
       const save = cache.put(cacheKey, response.clone()).catch((error) => console.warn('R2 cache write error', error));
-      if (execution?.waitUntil) execution.waitUntil(save);
-      else await save;
-    }
-    return response;
-  }
-
-  if (ref.startsWith('sb:')) {
-    const key = ref.slice(3);
-    if (!key.startsWith('images/') || key.includes('..') || key.length > 220) {
-      throw new HttpError(404, 'Rasm topilmadi');
-    }
-    if (!supabaseEnabled(env)) throw new HttpError(503, 'Rasm ombori hali ulanmagan');
-    // Rasm Worker orqali beriladi: manzil bitta domenda qoladi va CORS
-    // sarlavhalari ilova kutgandek bo'ladi. Edge cache takror o'qishni kamaytiradi.
-    const cache = typeof caches !== 'undefined' ? caches.default : null;
-    const cacheKey = cache && request
-      ? new Request(new URL(request.url).origin + `/api/photo/${encodeURIComponent(ref)}`)
-      : null;
-    if (cacheKey) {
-      const cached = await cache.match(cacheKey);
-      if (cached) return cached;
-    }
-    const origin = await fetch(`${supabaseBase(env)}/storage/v1/object/public/${supabaseBucket(env)}/${key}`);
-    if (!origin.ok) throw new HttpError(origin.status === 404 ? 404 : 502, 'Rasm topilmadi');
-    const headers = mediaHeaders(origin.headers.get('content-type') || 'application/octet-stream');
-    const response = new Response(origin.body, { headers });
-    if (cacheKey) {
-      const save = cache.put(cacheKey, response.clone()).catch((error) => console.warn('Supabase cache write error', error));
       if (execution?.waitUntil) execution.waitUntil(save);
       else await save;
     }

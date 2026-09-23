@@ -4,7 +4,7 @@ import {
   needPhone, needShop, needTelegram, newId, newToken, notifyShop, now, num, one, parseJson, parseList, personName,
   publicUser, regionRouteKm, run, sendCode, serializeCargo, serializeCourier, serializeOrder, serializeProduct,
   isMediaRef,
-  r2Enabled, supabaseEnabled, serializeShop, shopWithStats, storeDataUri, storeImageBytes, str, tariffPrice,
+  r2Enabled, serializeShop, shopWithStats, storeDataUri, storeImageBytes, str, tariffPrice,
 } from './lib.js';
 
 const SHOP_STATS = `SELECT s.*,
@@ -110,12 +110,12 @@ async function cleanupStaleGuestData(env) {
 const MAX_DIRECT_IMAGE_BYTES = 4 * 1024 * 1024;
 const MAX_D1_IMAGE_BYTES = 900 * 1024;
 
-/// Rasmlar bazadan tashqarida (R2 yoki Supabase Storage) saqlanadimi.
+/// Rasmlar bazadan tashqarida (Cloudflare R2) saqlanadimi.
 /// D1 BLOB — oxirgi chora: uning bepul chegarasi atigi 500 MB.
-const objectStore = (env) => r2Enabled(env) || supabaseEnabled(env);
+const objectStore = (env) => r2Enabled(env);
 
 /// Hozir qaysi ombor ishlayotgani: media_uploads jadvali va /api/health uchun
-const mediaStoreName = (env) => (r2Enabled(env) ? 'r2' : supabaseEnabled(env) ? 'sb' : 'd1');
+const mediaStoreName = (env) => (r2Enabled(env) ? 'r2' : 'd1');
 
 async function takeMediaQuota(env, context, bytes) {
   const privileged = Boolean(context.user.registered_at || context.shop || context.courier);
