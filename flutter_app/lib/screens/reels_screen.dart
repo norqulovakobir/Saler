@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 import '../api.dart';
 import '../categories.dart';
 import '../l10n.dart';
-import '../main.dart' show showToast, confirmDialog, rootTab;
+import '../main.dart' show showToast, confirmDialog, rootTab, openRootTab;
 import '../models.dart';
 import '../state.dart';
 import '../theme.dart';
@@ -348,6 +348,16 @@ class _ReelsScreenState extends State<ReelsScreen> with WidgetsBindingObserver {
             left: 16,
             right: 8,
             child: Row(children: [
+              // Reels'da pastki panel yo'q, shuning uchun chiqish yo'li shu
+              // tugma: bosh sahifaga (Do'konlar) qaytaradi.
+              IconButton(
+                tooltip: tr('Ortga'),
+                onPressed: () => openRootTab?.call(0),
+                icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+              ),
+              const SizedBox(width: 6),
               const Text('Reels', style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800, letterSpacing: -.5)),
               const SizedBox(width: 10),
               _GlassChip(icon: Icons.auto_awesome, label: tr('Siz uchun'), onTap: _showInterests),

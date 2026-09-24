@@ -1,5 +1,5 @@
+import 'dart:async';
 import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
@@ -24,6 +24,11 @@ import 'widgets.dart';
 
 /// Hozir ochiq pastki bo'lim (Reels ko'rish vaqtini faqat u ochiq bo'lganda hisoblaydi). -1: sotuvchi yoki kuryer rejimi
 final rootTab = ValueNotifier<int>(0);
+
+/// Pastki bo'limni ichkaridan almashtirish. RootShell o'rnatadi; Reels'dagi
+/// "ortga" tugmasi shu orqali bosh sahifaga qaytaradi, chunki u yerda pastki
+/// panel ko'rsatilmaydi.
+void Function(int tab)? openRootTab;
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -194,6 +199,9 @@ class _RydexAppState extends State<RydexApp> {
     await Api.instance.init();
     await AppState.instance.load();
     await Notify.instance.init();
+    // Push tokeni fonda olinadi: Firebase javob bermasa ham ilova kutib
+    // qolmasin, qolgan hamma narsa lokal bildirishnoma bilan ishlayveradi.
+    unawaited(Notify.instance.startPush());
     // Jonli yangilanishlar mehmon uchun ham ishlaydi (buyurtma, pul, bildirishnoma)
     AppState.instance.startLive();
   }
@@ -291,34 +299,45 @@ class FloatingNav extends StatelessWidget {
           borderRadius: BorderRadius.circular(38),
           boxShadow: [
             BoxShadow(
-                color: Colors.black.withValues(alpha: dark ? .34 : .16),
+                color: Colors.black.withValues(alpha: dark ? .38 : .14),
                 offset: const Offset(0, 14),
-                blurRadius: 30,
-                spreadRadius: -6),
-            BoxShadow(
-                color: Colors.black.withValues(alpha: .05), blurRadius: 24),
+                blurRadius: 34,
+                spreadRadius: -8),
           ],
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(38),
           child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+            // Kuchli blur — shishaning "muzlatilgan" hissi shundan chiqadi:
+            // ostidagi kontent rang sifatida sezilib turadi, lekin o'qishga
+            // xalaqit bermaydi.
+            filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
             child: Container(
               height: 70,
               decoration: BoxDecoration(
-                border: Border.all(color: const Color(0xFFE6E8EC)),
+                // Ichki yorug' qirra: yuqoridan oq, pastdan deyarli ko'rinmas —
+                // shisha chekkasi yorug'likni ushlagandek bo'ladi.
+                border: Border.all(
+                    color: Colors.white.withValues(alpha: dark ? .16 : .75),
+                    width: 1.2),
                 borderRadius: BorderRadius.circular(38),
-                // Oq, lekin to'liq qattiq emas: ozgina shaffoflik ostidagi
-                // kontentni sezdiradi, BackdropFilter esa uni xiralashtirib
-                // "glass" hissini saqlaydi.
+                // Shisha mavzuga moslashadi: kunduzi oq, tunda to'q. Tunda
+                // ham oq qoldirilsa, panel ham, ikonka ham och bo'lib,
+                // ikkalasi bir-biriga qo'shilib ketadi.
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: [
-                    Colors.white.withValues(alpha: .97),
-                    Colors.white.withValues(alpha: .93),
-                    const Color(0xFFF4F5F7).withValues(alpha: .95),
-                  ],
+                  colors: dark
+                      ? [
+                          const Color(0xFF1A2130).withValues(alpha: .72),
+                          const Color(0xFF10151F).withValues(alpha: .60),
+                          const Color(0xFF151B27).withValues(alpha: .66),
+                        ]
+                      : [
+                          Colors.white.withValues(alpha: .62),
+                          Colors.white.withValues(alpha: .44),
+                          Colors.white.withValues(alpha: .54),
+                        ],
                 ),
               ),
               child: LayoutBuilder(
@@ -375,10 +394,12 @@ class _GlowNavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Panel foni har ikki mavzuda ham oq, shuning uchun ranglar mavzuga
-    // qarab o'zgarmaydi: aktiv bo'lim qora, qolganlari kulrang.
-    const activeColor = Color(0xFF101722);
-    const idleColor = Color(0xFF8A9099);
+    // Shisha mavzuga qarab oq yoki to'q bo'lgani uchun ikonka ham shunga
+    // teskari olinadi — aks holda tunda to'q ikonka to'q shishada yo'qoladi.
+    final dark = context.isDark;
+    final activeColor = dark ? Colors.white : const Color(0xFF101722);
+    final idleColor =
+        dark ? Colors.white.withValues(alpha: .62) : const Color(0xFF6B7280);
     return AnimatedContainer(
       duration: const Duration(milliseconds: 280),
       curve: Curves.easeOutCubic,
@@ -393,15 +414,17 @@ class _GlowNavItem extends StatelessWidget {
                 child: IgnorePointer(
                   child: DecoratedBox(
                     decoration: BoxDecoration(
+                      // Shishada aktiv bo'lim to'q dog' bilan emas, yorug'
+                      // nur bilan ajratiladi — oyna aks etgandek.
                       gradient: RadialGradient(
                         center: const Alignment(0, -.15),
                         radius: .82,
                         colors: [
-                          activeColor.withValues(alpha: .08),
-                          activeColor.withValues(alpha: .03),
+                          Colors.white.withValues(alpha: dark ? .20 : .55),
+                          Colors.white.withValues(alpha: dark ? .07 : .22),
                           Colors.transparent
                         ],
-                        stops: const [0, .46, 1],
+                        stops: const [0, .5, 1],
                       ),
                     ),
                   ),
@@ -427,7 +450,7 @@ class _GlowNavItem extends StatelessWidget {
                               Text(item.label,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                       color: activeColor,
                                       fontSize: 12.5,
                                       fontWeight: FontWeight.w800,
@@ -449,7 +472,9 @@ class _GlowNavItem extends StatelessWidget {
                       color: badgeColor,
                       borderRadius: BorderRadius.circular(8),
                       // Oq panelda ajralib tursin uchun halqa ham oq
-                      border: Border.all(color: Colors.white, width: 1.5)),
+                      border: Border.all(
+                          color: dark ? const Color(0xFF151B27) : Colors.white,
+                          width: 1.5)),
                   alignment: Alignment.center,
                   child: Text('$badge',
                       style: const TextStyle(
@@ -482,6 +507,7 @@ class _RootShellState extends State<RootShell> {
   @override
   void initState() {
     super.initState();
+    openRootTab = onTab;
     sellerMode = AppState.instance.sellerShop != null;
     courierMode = !sellerMode && AppState.instance.courier != null;
     // Ilova ochiq bo'lsa, yangi buyurtma banner sifatida ham ko'rinadi
@@ -522,6 +548,7 @@ class _RootShellState extends State<RootShell> {
 
   @override
   void dispose() {
+    if (openRootTab == onTab) openRootTab = null;
     pager.dispose();
     super.dispose();
   }
@@ -639,8 +666,12 @@ class _RootShellState extends State<RootShell> {
           },
           children: [for (final page in pages) KeepAlivePage(child: page)],
         ),
-        // Reels va xarita ekranlarida ham panel kontent ustida suzib turadi.
-        bottomNavigationBar: FloatingNav(
+        // Reels to'liq ekran tomosha qilinadi — panel u yerda ko'rsatilmaydi,
+        // o'rniga ekranning tepasida "ortga" tugmasi bor. Qolgan bo'limlarda
+        // panel kontent ustida suzib turadi.
+        bottomNavigationBar: index == 1
+            ? null
+            : FloatingNav(
           index: index,
           onTap: onTab,
           items: [
