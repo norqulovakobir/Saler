@@ -81,6 +81,7 @@ class _SellerHomeState extends State<SellerHome> {
           if (nav != null && nav.canPop()) nav.pop();
         },
         child: Scaffold(
+          extendBody: true,
           body: Stack(fit: StackFit.expand, children: [
             PageView(
               controller: pager,

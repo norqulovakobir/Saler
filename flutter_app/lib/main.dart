@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
@@ -263,10 +265,9 @@ class NavItem {
   const NavItem(this.icon, this.active, this.label);
 }
 
-/// Oddiy oq pastki navigatsiya: blur, gradient va glow yo'q — faqat oq fon,
-/// ingichka yuqori chiziq va bo'limlar teng kenglikda. Har rejim bir xil
-/// komponentdan foydalangani uchun xaridor, sotuvchi va kuryer
-/// interfeyslarining hissi yagona bo'lib qoladi.
+/// Suzuvchi pastki navigatsiya — shaffof glass pill, aktiv bo'limga lime glow.
+/// Har rejim bir xil komponentdan foydalangani uchun xaridor, sotuvchi va
+/// kuryer interfeyslarining hissi yagona bo'lib qoladi.
 class FloatingNav extends StatelessWidget {
   final List<NavItem> items;
   final int index;
@@ -281,29 +282,75 @@ class FloatingNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.p;
-    return DecoratedBox(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: Color(0xFFE6E8EC))),
-      ),
-      // Telefon pastidagi tizim chizig'i ustiga tushib qolmasligi uchun.
-      child: SafeArea(
-        top: false,
-        child: SizedBox(
-          height: 62,
-          child: Row(
-            children: [
-              for (var i = 0; i < items.length; i++)
-                Expanded(
-                  child: _PlainNavItem(
-                    item: items[i],
-                    selected: i == index,
-                    badge: badges[i] ?? 0,
-                    badgeColor: p.danger,
-                    onTap: () => onTap(i),
-                  ),
+    final dark = context.isDark;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          14, 0, 14, 12 + MediaQuery.of(context).padding.bottom * .28),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(38),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withValues(alpha: dark ? .34 : .16),
+                offset: const Offset(0, 14),
+                blurRadius: 30,
+                spreadRadius: -6),
+            BoxShadow(
+                color: Colors.black.withValues(alpha: .05), blurRadius: 24),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(38),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+            child: Container(
+              height: 70,
+              decoration: BoxDecoration(
+                border: Border.all(color: const Color(0xFFE6E8EC)),
+                borderRadius: BorderRadius.circular(38),
+                // Oq, lekin to'liq qattiq emas: ozgina shaffoflik ostidagi
+                // kontentni sezdiradi, BackdropFilter esa uni xiralashtirib
+                // "glass" hissini saqlaydi.
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Colors.white.withValues(alpha: .97),
+                    Colors.white.withValues(alpha: .93),
+                    const Color(0xFFF4F5F7).withValues(alpha: .95),
+                  ],
                 ),
-            ],
+              ),
+              child: LayoutBuilder(
+                builder: (_, box) {
+                  final count = items.length;
+                  // Tanlangan bo'lim nomi uchun yetarli joy qoladi; qolgan
+                  // ikonkalarning oralig'i ekranga qarab avtomatik moslashadi.
+                  final activeWidth = count <= 3
+                      ? 132.0
+                      : count == 4
+                          ? 126.0
+                          : 118.0;
+                  final inactiveWidth = count <= 1
+                      ? box.maxWidth
+                      : (box.maxWidth - activeWidth) / (count - 1);
+                  return Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      for (var i = 0; i < count; i++)
+                        _GlowNavItem(
+                          item: items[i],
+                          selected: i == index,
+                          width: i == index ? activeWidth : inactiveWidth,
+                          badge: badges[i] ?? 0,
+                          badgeColor: p.danger,
+                          onTap: () => onTap(i),
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ),
           ),
         ),
       ),
@@ -311,73 +358,107 @@ class FloatingNav extends StatelessWidget {
   }
 }
 
-class _PlainNavItem extends StatelessWidget {
+class _GlowNavItem extends StatelessWidget {
   final NavItem item;
   final bool selected;
+  final double width;
   final int badge;
   final Color badgeColor;
   final VoidCallback onTap;
-  const _PlainNavItem(
+  const _GlowNavItem(
       {required this.item,
       required this.selected,
+      required this.width,
       required this.badge,
       required this.badgeColor,
       required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    // Oq fonda tanlangan bo'lim qora, qolganlari kulrang. Boshqa ajratuvchi
-    // belgi yo'q — nom har doim ko'rinib turgani uchun kifoya.
+    // Panel foni har ikki mavzuda ham oq, shuning uchun ranglar mavzuga
+    // qarab o'zgarmaydi: aktiv bo'lim qora, qolganlari kulrang.
     const activeColor = Color(0xFF101722);
     const idleColor = Color(0xFF8A9099);
-    final color = selected ? activeColor : idleColor;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+      width: width,
+      height: 70,
+      child: Stack(
+          alignment: Alignment.center,
+          clipBehavior: Clip.none,
           children: [
-            Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Icon(selected ? item.active : item.icon,
-                    size: 24, color: color),
-                if (badge > 0)
-                  Positioned(
-                    top: -4,
-                    right: -8,
-                    child: Container(
-                      constraints: const BoxConstraints(minWidth: 16),
-                      height: 16,
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      decoration: BoxDecoration(
-                          color: badgeColor,
-                          borderRadius: BorderRadius.circular(8),
-                          border:
-                              Border.all(color: Colors.white, width: 1.5)),
-                      alignment: Alignment.center,
-                      child: Text('$badge',
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 9,
-                              fontWeight: FontWeight.w800)),
+            if (selected)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: RadialGradient(
+                        center: const Alignment(0, -.15),
+                        radius: .82,
+                        colors: [
+                          activeColor.withValues(alpha: .08),
+                          activeColor.withValues(alpha: .03),
+                          Colors.transparent
+                        ],
+                        stops: const [0, .46, 1],
+                      ),
                     ),
                   ),
-              ],
+                ),
+              ),
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onTap,
+                borderRadius: BorderRadius.circular(34),
+                splashColor: activeColor.withValues(alpha: .10),
+                highlightColor: activeColor.withValues(alpha: .04),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: double.infinity,
+                  child: selected
+                      ? Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                              Icon(item.active,
+                                  size: 27, color: activeColor),
+                              const SizedBox(height: 2),
+                              Text(item.label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      color: activeColor,
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: -.15)),
+                            ])
+                      : Icon(item.icon, size: 27, color: idleColor),
+                ),
+              ),
             ),
-            const SizedBox(height: 3),
-            Text(item.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    color: color,
-                    fontSize: 11,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                    letterSpacing: -.1)),
-          ],
-        ),
-      ),
+            if (badge > 0)
+              Positioned(
+                top: 13,
+                right: selected ? 13 : (width - 42) / 2,
+                child: Container(
+                  constraints: const BoxConstraints(minWidth: 16),
+                  height: 16,
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  decoration: BoxDecoration(
+                      color: badgeColor,
+                      borderRadius: BorderRadius.circular(8),
+                      // Oq panelda ajralib tursin uchun halqa ham oq
+                      border: Border.all(color: Colors.white, width: 1.5)),
+                  alignment: Alignment.center,
+                  child: Text('$badge',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800)),
+                ),
+              ),
+          ]),
     );
   }
 }
@@ -544,6 +625,7 @@ class _RootShellState extends State<RootShell> {
         if (nav != null && nav.canPop()) nav.pop();
       },
       child: Scaffold(
+        extendBody: true,
         body: PageView(
           controller: pager,
           // Ichki Reels foto-sliderni va xaritani Flutter gesture arenasi
@@ -585,7 +667,7 @@ void showToast(BuildContext context, String msg, {bool error = false}) {
     ..showSnackBar(SnackBar(
         content: Text(msg),
         backgroundColor: error ? Colors.red.shade700 : null,
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16)));
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 100)));
 }
 
 Future<bool> confirmDialog(BuildContext context, String title,
