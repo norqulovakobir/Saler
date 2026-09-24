@@ -737,16 +737,41 @@ String _compactNum(int n) => n >= 1000000
         ? '${(n / 1000).toStringAsFixed(1)}K'
         : '$n';
 
-Future<void> _addToCart(BuildContext context, Product p) async {
-  if (!AppState.instance.addToCart(p)) {
+Future<void> _addToCart(BuildContext context, Product p, {int qty = 1}) async {
+  if (!AppState.instance.addToCart(p, qty: qty)) {
     final ok = await confirmDialog(
         context, tr("Savatchada boshqa do'kon mahsuloti bor"),
         text: tr("Tozalab, shu do'kondan boshlaymizmi?"),
         ok: tr('Ha, tozalash'));
     if (!ok) return;
-    AppState.instance.addToCart(p, force: true);
+    AppState.instance.addToCart(p, force: true, qty: qty);
   }
   if (context.mounted) showToast(context, tr("Savatchaga qo'shildi"));
+}
+
+/// Soni tanlash: − 1 + . Mahsulot sahifasida ham, buyurtma oynasida ham
+/// bir xil ko'rinadi. Chegara 1..50 — savatdagi bilan bir xil.
+class QtyStepper extends StatelessWidget {
+  final int qty;
+  final ValueChanged<int> onChange;
+  final double size;
+  const QtyStepper(
+      {super.key, required this.qty, required this.onChange, this.size = 32});
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      IconBtn(Icons.remove,
+          size: size, bg: p.bg, onTap: qty > 1 ? () => onChange(-1) : null),
+      SizedBox(
+          width: 34,
+          child: Text('$qty',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontWeight: FontWeight.w800))),
+      IconBtn(Icons.add,
+          size: size, bg: p.bg, onTap: qty < 50 ? () => onChange(1) : null),
+    ]);
+  }
 }
 
 /// Ulashish: tizimning ulashish oynasi (Telegram, SMS, ...).
@@ -826,6 +851,7 @@ class ProductScreen extends StatefulWidget {
 class _ProductScreenState extends State<ProductScreen> {
   int page = 0;
   int? views;
+  int qty = 1;
 
   @override
   void initState() {
@@ -912,7 +938,7 @@ class _ProductScreenState extends State<ProductScreen> {
                   color: pal.bg,
                   borderRadius:
                       const BorderRadius.vertical(top: Radius.circular(28))),
-              padding: const EdgeInsets.fromLTRB(20, 22, 20, 28),
+              padding: const EdgeInsets.fromLTRB(20, 22, 20, 110),
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1050,23 +1076,40 @@ class _ProductScreenState extends State<ProductScreen> {
             decoration: BoxDecoration(color: pal.bg, boxShadow: [
               BoxShadow(color: pal.bg, blurRadius: 20, spreadRadius: 10)
             ]),
-            child: Row(children: [
-              IconBtn(Icons.phone_outlined,
-                  size: 54,
-                  color: pal.success,
-                  onTap: shop == null
-                      ? null
-                      : () => launchUrl(Uri.parse('tel:${shop.phone}'))),
-              const SizedBox(width: 10),
-              IconBtn(Icons.shopping_cart_outlined,
-                  size: 54, onTap: () => _addToCart(context, p)),
-              const SizedBox(width: 10),
-              Expanded(
-                  child: FilledButton.icon(
-                      icon: const Icon(Icons.bolt_rounded, size: 18),
-                      label: Text(tr('Sotib olish')),
-                      onPressed: () =>
-                          openOrderForm(context, [CartItem(p, 1)]))),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              // Soni shu yerda tanlanadi: savatga ham, to'g'ridan-to'g'ri
+              // buyurtmaga ham o'sha son ketadi.
+              Row(children: [
+                Text(tr('Soni'),
+                    style: TextStyle(
+                        color: pal.muted, fontWeight: FontWeight.w600)),
+                const Spacer(),
+                QtyStepper(
+                    qty: qty,
+                    onChange: (d) =>
+                        setState(() => qty = (qty + d).clamp(1, 50))),
+                const SizedBox(width: 14),
+                PriceText(p.price * qty, size: 16),
+              ]),
+              const SizedBox(height: 12),
+              Row(children: [
+                IconBtn(Icons.phone_outlined,
+                    size: 54,
+                    color: pal.success,
+                    onTap: shop == null
+                        ? null
+                        : () => launchUrl(Uri.parse('tel:${shop.phone}'))),
+                const SizedBox(width: 10),
+                IconBtn(Icons.shopping_cart_outlined,
+                    size: 54, onTap: () => _addToCart(context, p, qty: qty)),
+                const SizedBox(width: 10),
+                Expanded(
+                    child: FilledButton.icon(
+                        icon: const Icon(Icons.bolt_rounded, size: 18),
+                        label: Text(tr('Sotib olish')),
+                        onPressed: () =>
+                            openOrderForm(context, [CartItem(p, qty)]))),
+              ]),
             ]),
           ),
         ),
@@ -1227,6 +1270,21 @@ class _OrderSheetState extends State<OrderSheet> {
   int get total => widget.items.fold(0, (s, i) => s + i.product.price * i.qty);
   bool get registered => Api.instance.registered;
 
+  /// Savatdan kelgan buyurtmada son savatga ham yoziladi (u saqlanadi va
+  /// savat oynasi bilan bir xil qoladi). To'g'ridan-to'g'ri sotib olishda
+  /// esa faqat shu oynaning nusxasi o'zgaradi.
+  void _changeQty(CartItem it, int d) {
+    final next = it.qty + d;
+    if (next < 1 || next > 50) return;
+    setState(() {
+      if (widget.fromCart) {
+        AppState.instance.changeQty(it, d);
+      } else {
+        it.qty = next;
+      }
+    });
+  }
+
   @override
   void dispose() {
     form.dispose();
@@ -1332,20 +1390,33 @@ class _OrderSheetState extends State<OrderSheet> {
                     border:
                         context.isDark ? Border.all(color: p.border) : null),
                 child: Column(children: [
+                  // Soni oxirgi qadamda ham o'zgartiriladi: buyurtmani
+                  // bekor qilib, mahsulotga qaytishning hojati qolmaydi.
                   for (final i in widget.items)
                     Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
+                        padding: const EdgeInsets.only(bottom: 8),
                         child: Row(children: [
                           Expanded(
-                              child: Text(
-                                  i.qty > 1
-                                      ? '${i.product.name} × ${i.qty}'
-                                      : i.product.name,
+                              child: Text(i.product.name,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                       fontWeight: FontWeight.w600))),
-                          Text(fmtPrice(i.product.price * i.qty),
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.w700))
+                          if (!codeStep)
+                            QtyStepper(
+                                qty: i.qty,
+                                size: 28,
+                                onChange: (d) => _changeQty(i, d)),
+                          if (codeStep)
+                            Text('× ${i.qty}',
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w700)),
+                          SizedBox(
+                              width: 92,
+                              child: Text(fmtPrice(i.product.price * i.qty),
+                                  textAlign: TextAlign.right,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w700)))
                         ])),
                   Divider(color: p.border),
                   Row(children: [

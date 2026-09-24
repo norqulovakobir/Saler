@@ -202,13 +202,14 @@ class AppState extends ChangeNotifier {
   int get cartTotal => cart.fold(0, (s, c) => s + c.product.price * c.qty);
 
   /// Boshqa do'kon mahsuloti bo'lsa false qaytaradi (tasdiqlash kerak)
-  bool addToCart(Product p, {bool force = false}) {
+  bool addToCart(Product p, {bool force = false, int qty = 1}) {
     if (cart.isNotEmpty && cart.first.product.shopId != p.shopId) {
       if (!force) return false;
       cart.clear();
     }
+    final add = qty.clamp(1, 50);
     final it = cart.where((c) => c.product.id == p.id).firstOrNull;
-    it != null ? it.qty = (it.qty + 1).clamp(1, 50) : cart.add(CartItem(p, 1));
+    it != null ? it.qty = (it.qty + add).clamp(1, 50) : cart.add(CartItem(p, add));
     notifyListeners();
     _saveCart();
     return true;
