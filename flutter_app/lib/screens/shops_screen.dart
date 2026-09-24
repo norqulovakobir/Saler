@@ -359,7 +359,7 @@ class _ShopsScreenState extends State<ShopsScreen> {
                     onAction: () => Navigator.of(context).push(
                         MaterialPageRoute(builder: (_) => const MapScreen()))),
                 if (loading)
-                  const GridSkeleton(count: 4, aspect: .86)
+                  const GridSkeleton(count: 4, aspect: .82)
                 else if (error != null && shops.isEmpty)
                   EmptyBox(Icons.cloud_off_rounded,
                       "${tr("Serverga ulanib bo'lmadi")}\n$error",
@@ -381,9 +381,8 @@ class _ShopsScreenState extends State<ShopsScreen> {
                     crossAxisCount: 2,
                     mainAxisSpacing: 12,
                     crossAxisSpacing: 12,
-                    // Muqova 96px + nom/tavsif: avvalgi .86 kartani keraksiz
-                    // cho'zib yuborardi.
-                    childAspectRatio: .9),
+                    // Rasm kartochkani to'la egallaydi, matn uning ustida
+                    childAspectRatio: .82),
                 delegate: SliverChildBuilderDelegate(
                   (_, i) {
                     final card = ShopCard(shops[i],
@@ -448,7 +447,12 @@ class _ShopScreenState extends State<ShopScreen> {
     _followers = null;
     products = (r['products'] as List).map((e) => Product.fromJson(e)).toList();
     AppState.instance.chatShop = shop;
-    AppState.instance.refresh();
+    // Kesh sinxron qaytganda _apply initState/build ichida chaqiriladi —
+    // notifyListeners o'sha zahoti chaqirilsa "setState() called during
+    // build" xatosi chiqadi. Shuning uchun keyingi kadrga suriladi.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) AppState.instance.refresh();
+    });
     if (mounted) setState(() {});
   }
 

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'anim.dart';
 import 'api.dart';
 import 'config.dart';
@@ -530,9 +531,9 @@ ImageProvider uploadedImage(String ref) => ref.startsWith('data:')
 
 /// Do'kon kartochkasi (bosh sahifa).
 ///
-/// Muqovada do'konning mahsulot rasmlari sekin o'ngdan chapga suriladi —
-/// "keling, bu do'konda mana bu bor" degani. Rasm bo'lmasa eski ko'rinish:
-/// rangli gradient va logo.
+/// Mahsulot rasmi kartochkaning butun yuzasini egallaydi; logo, reyting,
+/// mahsulot nomi va narxi shu rasm ustida turadi — pastda alohida oq panel
+/// yo'q. Rasmlar har 4 soniyada almashadi va oxiridan boshiga qaytadi.
 class ShopCard extends StatelessWidget {
   final Shop s;
   final VoidCallback onTap;
@@ -541,209 +542,379 @@ class ShopCard extends StatelessWidget {
   /// aylanishi uchun boshlanish nuqtasi shunga qarab suriladi.
   final int index;
   const ShopCard(this.s, {super.key, required this.onTap, this.index = 0});
+
   @override
   Widget build(BuildContext context) {
     final p = context.p;
-    return Material(
-      color: p.card,
-      borderRadius: BorderRadius.circular(18),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
-        child: Container(
-          clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-              boxShadow: softShadow(context),
-              border: context.isDark ? Border.all(color: p.border) : null),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Stack(children: [
-              _ShopCover(s, index: index),
-              Positioned(top: 8, right: 8, child: RatingPill(s)),
-              // Ulashish: havola web sahifani ochadi, u yerdan buyurtma berish mumkin
-              Positioned(top: 8, left: 8, child: ShareBtn(link: shopLink(s.id), title: s.name, text: s.description)),
-              // Logo muqova bilan matn chegarasida turadi
-              Positioned(
-                left: 10,
-                bottom: -18,
-                child: Container(
-                    padding: const EdgeInsets.all(2.5),
-                    decoration: BoxDecoration(
-                        color: p.card,
-                        borderRadius: BorderRadius.circular(14),
-                        boxShadow: const [
-                          BoxShadow(
-                              color: Colors.black26,
-                              blurRadius: 10,
-                              offset: Offset(0, 4))
-                        ]),
-                    child: ShopAvatar(s, size: 36)),
-              ),
-            ]),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 22, 10, 10),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(s.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 13.5,
-                            letterSpacing: -.2)),
-                    const SizedBox(height: 2),
-                    Text(
-                        s.productCount > 0
-                            ? '${s.productCount} ${tr('mahsulot')}'
-                            : (s.description.isNotEmpty
-                                ? s.description
-                                : s.sellerName),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontSize: 11.5,
-                            color: p.muted,
-                            fontWeight: FontWeight.w500)),
-                  ]),
-            ),
-          ]),
-        ),
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+          color: p.card,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: softShadow(context),
+          border: context.isDark ? Border.all(color: p.border) : null),
+      // InkWell karusel va tugmalardan yuqorida emas, ularning ajdodi:
+      // surish PageView'ga, tugma bosilishi tugmaning o'ziga tegadi,
+      // qolgan hamma joyda esa do'kon sahifasi ochiladi.
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(onTap: onTap, child: _ShopCardBody(s, index: index)),
       ),
     );
   }
 }
 
-/// Muqova: mahsulot rasmlari uzluksiz siljiydi. Bitta rasm bo'lsa suriladigan
-/// narsa yo'q — u shunchaki to'ldirib turadi.
-class _ShopCover extends StatefulWidget {
+class _ShopCardBody extends StatefulWidget {
   final Shop s;
   final int index;
-  const _ShopCover(this.s, {required this.index});
+  const _ShopCardBody(this.s, {required this.index});
   @override
-  State<_ShopCover> createState() => _ShopCoverState();
+  State<_ShopCardBody> createState() => _ShopCardBodyState();
 }
 
-class _ShopCoverState extends State<_ShopCover> {
-  static const _h = 96.0;
-  static const _step = Duration(seconds: 3);
-  PageController? _pager;
+class _ShopCardBodyState extends State<_ShopCardBody> {
+  static const _step = Duration(seconds: 4);
+  static const _slide = Duration(milliseconds: 520);
+
+  /// Cheksiz aylanish uchun o'rta nuqtadan boshlanadi — oxiridan keyin
+  /// boshiga silliq o'tadi, orqaga surish ham ishlaydi.
+  static const _origin = 10000;
+
+  late final PageController _pager;
   Timer? _timer;
   int _page = 0;
 
-  List<String> get _photos => widget.s.preview;
+  /// Foydalanuvchi karuselga tekkanda avtomatik almashish shu vaqtgacha to'xtaydi
+  DateTime _pausedUntil = DateTime.fromMillisecondsSinceEpoch(0);
+
+  List<ShopPreviewItem> get _items => widget.s.previewItems;
+  bool get _many => _items.length > 1;
+  ShopPreviewItem? get _current =>
+      _items.isEmpty ? null : _items[_page % _items.length];
 
   @override
   void initState() {
     super.initState();
-    if (_photos.length > 1) {
-      // Qo'shni kartochkalar bir vaqtda sakramasligi uchun boshlanish
-      // vaqti har biriga biroz surildi.
-      _page = widget.index % _photos.length;
-      _pager = PageController(initialPage: _page);
-      _timer = Timer.periodic(_step + Duration(milliseconds: (widget.index % 5) * 320), (_) {
-        if (!mounted || _pager?.hasClients != true) return;
-        _page = (_page + 1) % _photos.length;
-        _pager!.animateToPage(_page,
-            duration: const Duration(milliseconds: 620),
-            curve: Curves.easeInOutCubic);
-      });
+    _page = _many ? _origin + widget.index : 0;
+    _pager = PageController(initialPage: _page);
+    if (_many) {
+      // Qo'shni kartochkalar bir vaqtda sakramasligi uchun qadam biroz surildi
+      _timer = Timer.periodic(
+          _step + Duration(milliseconds: (widget.index % 5) * 300), (_) => _tick());
     }
   }
 
   @override
   void dispose() {
     _timer?.cancel();
-    _pager?.dispose();
+    _pager.dispose();
     super.dispose();
+  }
+
+  void _tick() {
+    if (!mounted || !_pager.hasClients) return;
+    if (DateTime.now().isBefore(_pausedUntil)) return;
+    if (!_onScreen) return; // ekrandan tashqaridagi kartochka bekorga aylanmasin
+    _slideTo(_page + 1, byUser: false);
+  }
+
+  /// Kartochka ko'rinish maydonidami? Grid ekrandan tashqarida ham quradi.
+  bool get _onScreen {
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.attached || !box.hasSize) return false;
+    final top = box.localToGlobal(Offset.zero).dy;
+    final h = MediaQuery.of(context).size.height;
+    return top < h && top + box.size.height > 0;
+  }
+
+  void _pause() =>
+      _pausedUntil = DateTime.now().add(const Duration(seconds: 8));
+
+  void _slideTo(int page, {bool byUser = true}) {
+    if (!_many || !_pager.hasClients) return;
+    if (byUser) _pause();
+    _pager.animateToPage(page, duration: _slide, curve: Curves.easeInOutCubic);
+  }
+
+  /// Nuqta bosildi: eng yaqin yo'nalish bo'yicha o'sha rasmga o'tadi
+  void _jumpToDot(int i) {
+    final n = _items.length;
+    var d = (i - _page % n) % n;
+    if (d > n / 2) d -= n; // orqaga qaytish qisqaroq bo'lsa
+    _slideTo(_page + d);
   }
 
   @override
   Widget build(BuildContext context) {
     final p = context.p;
-    final c = colorFor(widget.s.name);
-    if (_photos.isEmpty) {
-      // Mahsulot rasmi yo'q: rangli fon va logo
-      return Container(
-        height: _h,
-        width: double.infinity,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [
-            c.withValues(alpha: context.isDark ? .35 : .18),
-            c.withValues(alpha: context.isDark ? .15 : .06)
-          ]),
-        ),
-        child: Center(child: ShopAvatar(widget.s, size: 46)),
-      );
-    }
-    return SizedBox(
-      height: _h,
-      width: double.infinity,
-      child: Stack(fit: StackFit.expand, children: [
-        ColoredBox(color: p.imageA),
-        if (_photos.length == 1)
-          _CoverImage(_photos.first)
-        else
-          PageView.builder(
+    final item = _current;
+    return Stack(fit: StackFit.expand, children: [
+      ColoredBox(color: p.imageA),
+      if (_items.isEmpty)
+        _EmptyCover(widget.s)
+      else if (!_many)
+        _CoverImage(_items.first.photo)
+      else
+        NotificationListener<ScrollNotification>(
+          // Barmoq bilan surilayotganda avtomatik almashish to'xtaydi
+          onNotification: (n) {
+            if (n is ScrollStartNotification || n is ScrollEndNotification) {
+              _pause();
+            }
+            return false;
+          },
+          child: PageView.builder(
             controller: _pager,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: _photos.length,
-            itemBuilder: (_, i) => _CoverImage(_photos[i]),
+            onPageChanged: (i) => setState(() => _page = i),
+            itemBuilder: (_, i) => _CoverImage(_items[i % _items.length].photo),
           ),
-        // Pastdagi qoraytma: logo va yuqoridagi tugmalar rasm ustida o'qilsin
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 0,
-          height: 40,
-          child: IgnorePointer(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                  colors: [Colors.black.withValues(alpha: .34), Colors.transparent],
+        ),
+      // Matn o'qilishi uchun pastdan yuqoriga qoraygan gradient
+      const Positioned.fill(child: IgnorePointer(child: _CardScrim())),
+      Positioned(top: 8, left: 8, child: _LogoRing(widget.s)),
+      Positioned(top: 8, right: 8, child: RatingPill(widget.s)),
+      // Ulashish: havola web sahifani ochadi, u yerdan buyurtma berish mumkin
+      Positioned(
+          top: 38,
+          right: 8,
+          child: ShareBtn(
+              link: shopLink(widget.s.id),
+              title: widget.s.name,
+              text: widget.s.description,
+              size: 24)),
+      if (_many) ...[
+        Align(
+            alignment: const Alignment(-.9, -.1),
+            child: _CarouselArrow(
+                icon: Icons.chevron_left_rounded,
+                onTap: () => _slideTo(_page - 1))),
+        Align(
+            alignment: const Alignment(.9, -.1),
+            child: _CarouselArrow(
+                icon: Icons.chevron_right_rounded,
+                onTap: () => _slideTo(_page + 1))),
+      ],
+      // Nuqtalar matndan yuqorida: ikkalasi bir-birini to'smaydi
+      Positioned(
+        left: 0,
+        right: 0,
+        bottom: 0,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (_many)
+            _Dots(
+                count: _items.length,
+                active: _page % _items.length,
+                onTap: _jumpToDot),
+          IgnorePointer(child: _CardCaption(item: item)),
+        ]),
+      ),
+    ]);
+  }
+}
+
+/// Rasm ustidagi qoraytma: tepasi shaffof, pasti to'q — matn o'qilsin
+class _CardScrim extends StatelessWidget {
+  const _CardScrim();
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.bottomCenter,
+            end: Alignment.topCenter,
+            colors: [
+              Colors.black.withValues(alpha: .82),
+              Colors.black.withValues(alpha: .46),
+              Colors.transparent,
+              Colors.black.withValues(alpha: .22),
+            ],
+            stops: const [0, .3, .62, 1],
+          ),
+        ),
+      );
+}
+
+/// Yuqori chap burchakdagi logo: oq hoshiyali doira.
+/// Logo bo'lmasa do'kon nomining bosh harfi chiqadi (ShopAvatar).
+class _LogoRing extends StatelessWidget {
+  final Shop s;
+  const _LogoRing(this.s);
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(2),
+        decoration: const BoxDecoration(
+          shape: BoxShape.circle,
+          color: Colors.white,
+          boxShadow: [
+            BoxShadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 2))
+          ],
+        ),
+        child: ClipOval(child: ShopAvatar(s, size: 26)),
+      );
+}
+
+/// Chap/o'ng o'tish tugmasi. Bosilganda do'kon sahifasiga o'tib ketmaydi:
+/// ichkaridagi tugma ajdod InkWell'dan oldin ishlaydi.
+class _CarouselArrow extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  const _CarouselArrow({required this.icon, required this.onTap});
+  @override
+  Widget build(BuildContext context) => Material(
+        color: const Color(0x73000000),
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(
+              width: 24,
+              height: 24,
+              child: Icon(icon, size: 18, color: Colors.white)),
+        ),
+      );
+}
+
+/// Faol rasmni bildiruvchi nuqtalar (pastki markazda)
+class _Dots extends StatelessWidget {
+  final int count;
+  final int active;
+  final ValueChanged<int> onTap;
+  const _Dots({required this.count, required this.active, required this.onTap});
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          for (var i = 0; i < count; i++)
+            GestureDetector(
+              // Nuqta bosilganda do'kon sahifasi ochilmasin: ichki
+              // "tap" ajdod InkWell'dan oldin qabul qilinadi
+              onTap: () => onTap(i),
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 5),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 260),
+                  width: i == active ? 12 : 5,
+                  height: 5,
+                  decoration: BoxDecoration(
+                      color:
+                          Colors.white.withValues(alpha: i == active ? .95 : .5),
+                      borderRadius: BorderRadius.circular(3)),
                 ),
               ),
             ),
-          ),
-        ),
-        if (_photos.length > 1)
-          Positioned(
-            right: 8,
-            bottom: 7,
-            child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  for (var i = 0; i < _photos.length; i++)
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 260),
-                      margin: const EdgeInsets.only(left: 3),
-                      width: i == _page ? 12 : 5,
-                      height: 5,
-                      decoration: BoxDecoration(
-                          color: Colors.white
-                              .withValues(alpha: i == _page ? .95 : .5),
-                          borderRadius: BorderRadius.circular(3)),
-                    ),
-                ]),
-          ),
-      ]),
+        ]),
+      );
+}
+
+/// Kartochka pastidagi matn: ayni ko'rinayotgan mahsulotning nomi va narxi
+class _CardCaption extends StatelessWidget {
+  final ShopPreviewItem? item;
+  const _CardCaption({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    final name = item?.name.trim() ?? '';
+    final price = item?.price;
+    final old = item?.oldPrice;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(9, 0, 9, 8),
+      child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (name.isNotEmpty)
+              Text(name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 10.5,
+                      height: 1.1,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white.withValues(alpha: .88))),
+            if (price != null)
+              if (price > 0)
+                Row(children: [
+                  Flexible(
+                      child: PriceText(price, size: 13.5, color: Colors.white)),
+                  if (old != null && old > price) ...[
+                    const SizedBox(width: 4),
+                    Text(fmtPrice(old),
+                        maxLines: 1,
+                        style: TextStyle(
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w600,
+                            decoration: TextDecoration.lineThrough,
+                            color: Colors.white.withValues(alpha: .65))),
+                  ],
+                ])
+              else
+                Text(tr('Narx kelishiladi'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 12,
+                        height: 1.2,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white)),
+          ]),
     );
   }
 }
 
+/// Mahsulot yoki rasm yo'q: rangli gradient va katta logo
+class _EmptyCover extends StatelessWidget {
+  final Shop s;
+  const _EmptyCover(this.s);
+  @override
+  Widget build(BuildContext context) {
+    final c = colorFor(s.name);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              c.withValues(alpha: context.isDark ? .55 : .42),
+              c.withValues(alpha: context.isDark ? .28 : .16)
+            ]),
+      ),
+      child: Center(child: ShopAvatar(s, size: 52)),
+    );
+  }
+}
+
+/// Kartochkadagi mahsulot rasmi.
+///
+/// Mahsulot to'liq ko'rinishi kerak — kesib tashlansa yoki kattalashtirilsa
+/// nima sotilayotgani bilinmay qoladi. Shuning uchun rasm `contain` bilan
+/// butunicha sig'diriladi, yon tomonlarda qoladigan bo'shliq esa o'sha
+/// rasmning xiralashtirilgan nusxasi bilan to'ldiriladi: kartochkada oq
+/// chiziq qolmaydi.
 class _CoverImage extends StatelessWidget {
   final String ref;
   const _CoverImage(this.ref);
+
   @override
-  Widget build(BuildContext context) => Image.network(
-        Api.instance.photoUrl(ref),
-        fit: BoxFit.cover,
-        gaplessPlayback: true,
-        errorBuilder: (_, __, ___) => ColoredBox(color: context.p.imageA),
-      );
+  Widget build(BuildContext context) {
+    final url = Api.instance.photoUrl(ref);
+    return Stack(fit: StackFit.expand, children: [
+      ImageFiltered(
+        imageFilter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+        child: Image.network(url,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            filterQuality: FilterQuality.low,
+            errorBuilder: (_, __, ___) => ColoredBox(color: context.p.imageA)),
+      ),
+      ColoredBox(color: Colors.black.withValues(alpha: .18)),
+      Image.network(url,
+          fit: BoxFit.contain,
+          gaplessPlayback: true,
+          // Kichik rasm kartochka o'lchamiga cho'zilganda ham tiniq qolsin
+          filterQuality: FilterQuality.medium,
+          errorBuilder: (_, __, ___) => const SizedBox.shrink()),
+    ]);
+  }
 }
 
 /// Daraja rangi (Yangi/Bronza/Kumush/Oltin/Platina)
@@ -995,6 +1166,98 @@ class PriceText extends StatelessWidget {
                 fontSize: size * .73,
                 color: (color ?? context.p.text).withValues(alpha: .55))),
       ]));
+}
+
+/// Buyurtmani olib kelayotgan haydovchi: rasmi, ismi, davlat raqami va
+/// mashinasining rasmi. Xaridor kimni va qanday mashinani kutayotganini
+/// oldindan biladi.
+class DriverCard extends StatelessWidget {
+  final String name;
+  final String phone;
+  final String? photo;
+  final String? carPhoto;
+  final String plate;
+  final String title;
+  const DriverCard({
+    super.key,
+    required this.name,
+    this.phone = '',
+    this.photo,
+    this.carPhoto,
+    this.plate = '',
+    required this.title,
+  });
+
+  /// Hech qanday ma'lumot yo'q bo'lsa kartochka ko'rsatilmaydi
+  bool get isEmpty => name.trim().isEmpty && plate.isEmpty && photo == null && carPhoto == null;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    if (isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(color: p.bg, borderRadius: BorderRadius.circular(16)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(title, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: p.muted)),
+        const SizedBox(height: 8),
+        Row(children: [
+          Container(
+            width: 44,
+            height: 44,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: p.card),
+            child: photo == null
+                ? Icon(Icons.person_outline_rounded, color: p.muted)
+                : Image(image: uploadedImage(photo!), fit: BoxFit.cover),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+              Text(name.trim().isEmpty ? tr('Haydovchi') : name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+              if (plate.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                        color: p.card,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: p.border)),
+                    child: Text(plate,
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, letterSpacing: .6)),
+                  ),
+                ),
+            ]),
+          ),
+          if (phone.isNotEmpty)
+            IconBtn(
+              Icons.phone_outlined,
+              color: p.success,
+              bg: p.card,
+              size: 40,
+              onTap: () => launchUrl(Uri.parse('tel:$phone')),
+            ),
+        ]),
+        if (carPhoto != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                height: 120,
+                width: double.infinity,
+                child: Image(image: uploadedImage(carPhoto!), fit: BoxFit.cover),
+              ),
+            ),
+          ),
+      ]),
+    );
+  }
 }
 
 /// Qidiruv maydoni ko'rinishi

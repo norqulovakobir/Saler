@@ -473,8 +473,10 @@ class _ReelPageState extends State<_ReelPage> with SingleTickerProviderStateMixi
     final p = context.p;
     final photos = pr.photos;
     final top = MediaQuery.of(context).padding.top;
-    // Pastda suzuvchi navigatsiya paneli bor: kontent undan yuqorida turadi
-    final bottom = MediaQuery.of(context).padding.bottom + 104;
+    // Reels'da pastki navigatsiya paneli yo'q (yuqoridagi "Ortga" tugmasi
+    // chiqish yo'li), shuning uchun nom, narx va amallar ekran pastiga
+    // yaqin turadi — avvalgi 104px ularni keraksiz yuqoriga ko'tarardi.
+    final bottom = MediaQuery.of(context).padding.bottom + 24;
     final cat = categoryOf(pr.category);
     return GestureDetector(
       onDoubleTap: () {
@@ -655,6 +657,8 @@ class _ReelImage extends StatelessWidget {
         Image.network(
           url,
           fit: BoxFit.contain,
+          // Rasm butun ekranga cho'zilganda ham tiniq qolsin
+          filterQuality: FilterQuality.medium,
           loadingBuilder: (_, child, progress) => progress == null ? child : const Center(child: CircularProgressIndicator(color: Colors.white54, strokeWidth: 2)),
           errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image_outlined, color: Colors.white38, size: 56)),
         ),

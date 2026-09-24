@@ -225,7 +225,10 @@ class _NearbyList extends StatelessWidget {
       SectionTitle(tr('Sizga yaqin')),
       if (data.products.isNotEmpty)
         SizedBox(
-          height: 208,
+          // Kartochka balandligi: 10 (padding) + 130 (kvadrat rasm: 150-20)
+          // + 10 + 17.5 (nom) + 6 + 30 (narx/tugma qatori) + 10 = ~214.
+          // Avvalgi 208 shu sabab 5px ga toshib ketardi.
+          height: 216,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             padding: EdgeInsets.zero,

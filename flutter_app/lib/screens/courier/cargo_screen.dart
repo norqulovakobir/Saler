@@ -328,6 +328,16 @@ class _CarrierCard extends StatelessWidget {
                 Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(color: c.online ? p.successSoft : p.bg, borderRadius: BorderRadius.circular(99)), child: Text(c.online ? tr('Onlayn') : tr('Oflayn'), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: c.online ? p.success : p.muted))),
               ]),
               Text('${cargoVehicleName(c.vehicleType)}${c.capacityKg > 0 ? ' · ${c.capacityKg} kg' : ''}', style: TextStyle(fontSize: 12, color: p.muted, fontWeight: FontWeight.w600)),
+              // Mijoz qaysi mashinani kutishini oldindan biladi
+              if (c.plate.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(color: p.bg, borderRadius: BorderRadius.circular(6), border: Border.all(color: p.border)),
+                    child: Text(c.plate, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, letterSpacing: .6)),
+                  ),
+                ),
               // Reyting o'rniga haqiqiy bajarilgan reyslar soni
               Row(children: [
                 Icon(Icons.local_shipping_outlined, size: 13, color: p.muted),
@@ -337,6 +347,13 @@ class _CarrierCard extends StatelessWidget {
             ]),
           ),
         ]),
+        if (c.carPhoto != null) ...[
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: SizedBox(height: 140, width: double.infinity, child: Image(image: uploadedImage(c.carPhoto!), fit: BoxFit.cover)),
+          ),
+        ],
         if (c.regions.isNotEmpty) ...[
           const SizedBox(height: 10),
           Wrap(spacing: 6, runSpacing: 6, children: [for (final r in c.regions) Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4), decoration: BoxDecoration(color: p.bg, borderRadius: BorderRadius.circular(99)), child: Text(r, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)))]),
@@ -390,17 +407,27 @@ class _MyCargo extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(color: p.card, borderRadius: BorderRadius.circular(18), boxShadow: softShadow(context), border: context.isDark ? Border.all(color: p.border) : null),
-      child: Row(children: [
-        Container(width: 42, height: 42, decoration: BoxDecoration(color: p.bg, borderRadius: BorderRadius.circular(13)), child: Icon(Icons.local_shipping_outlined, color: p.accentText, size: 20)),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('${o.fromRegion} → ${o.toRegion}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
-            Text('${o.carrierName}${o.cargo.isNotEmpty ? ' · ${o.cargo}' : ''}${o.date.isNotEmpty ? ' · ${o.date}' : ''}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: p.muted, fontWeight: FontWeight.w600)),
-          ]),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(width: 42, height: 42, decoration: BoxDecoration(color: p.bg, borderRadius: BorderRadius.circular(13)), child: Icon(Icons.local_shipping_outlined, color: p.accentText, size: 20)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('${o.fromRegion} → ${o.toRegion}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+              Text('${o.carrierName}${o.cargo.isNotEmpty ? ' · ${o.cargo}' : ''}${o.date.isNotEmpty ? ' · ${o.date}' : ''}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: p.muted, fontWeight: FontWeight.w600)),
+            ]),
+          ),
+          Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4), decoration: BoxDecoration(color: color.withValues(alpha: .13), borderRadius: BorderRadius.circular(99)), child: Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 11))),
+        ]),
+        // Yukni kim olib ketadi: haydovchi rasmi, mashinasi va davlat raqami
+        DriverCard(
+          title: tr('Yukingizni olib ketadi'),
+          name: o.carrierName,
+          phone: o.carrierPhone,
+          photo: o.carrierPhoto,
+          carPhoto: o.carrierCarPhoto,
+          plate: o.carrierPlate,
         ),
-        Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4), decoration: BoxDecoration(color: color.withValues(alpha: .13), borderRadius: BorderRadius.circular(99)), child: Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 11))),
-        if (o.carrierPhone.isNotEmpty) ...[const SizedBox(width: 6), IconBtn(Icons.phone_outlined, size: 34, bg: p.bg, color: p.success, onTap: () => launchUrl(Uri.parse('tel:${o.carrierPhone}')))],
       ]),
     );
   }

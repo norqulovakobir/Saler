@@ -4,7 +4,6 @@ plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
-    id("com.google.gms.google-services")
 }
 
 // Release imzosi: android/key.properties (git'ga kirmaydi) ichidagi kalit.
@@ -73,4 +72,23 @@ dependencies {
 
 flutter {
     source = "../.."
+}
+
+// Firebase (push xabarlar) faqat shu paket uchun sozlangan bo'lsa ulanadi.
+//
+// google-services plagini ilova paketini google-services.json ichidan
+// topolmasa butun build'ni to'xtatadi. Ilova esa push'siz ham to'liq
+// ishlaydi — Notify.startPush() xatoni yutadi va lokal bildirishnomalarga
+// tushadi. Shuning uchun konfiguratsiya mos kelmasa plagin qo'shilmaydi:
+// APK baribir yig'iladi, faqat push o'chiq bo'ladi.
+val firebaseConfig = file("google-services.json")
+val firebaseReady = firebaseConfig.exists() &&
+    firebaseConfig.readText().contains("\"package_name\": \"uz.saler.saler_ai\"")
+if (firebaseReady) {
+    apply(plugin = "com.google.gms.google-services")
+} else {
+    logger.lifecycle(
+        "Firebase o'tkazib yuborildi: google-services.json da 'uz.saler.saler_ai' yo'q. " +
+            "Push xabarlar ishlamaydi, qolgan hamma narsa ishlaydi."
+    )
 }

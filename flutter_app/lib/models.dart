@@ -1,3 +1,32 @@
+/// Do'kon kartochkasi karuselidagi bitta mahsulot: rasm, nom va narx.
+///
+/// Server `previewItems` bermasa (eski versiya), faqat rasm qoladi —
+/// [name] bo'sh, [price] esa null bo'ladi va kartochka narx qatorini
+/// umuman ko'rsatmaydi. Narx 0 bo'lsa "Narx kelishiladi" chiqadi.
+class ShopPreviewItem {
+  final String id;
+  final String name;
+  final int? price;
+  final int? oldPrice; // chegirma bo'lsa: ustidan chizilgan eski narx
+  final String photo;
+
+  const ShopPreviewItem({
+    this.id = '',
+    this.name = '',
+    this.price,
+    this.oldPrice,
+    required this.photo,
+  });
+
+  factory ShopPreviewItem.fromJson(Map<String, dynamic> j) => ShopPreviewItem(
+        id: j['id'] ?? '',
+        name: j['name'] ?? '',
+        price: (j['price'] as num?)?.round(),
+        oldPrice: (j['oldPrice'] as num?)?.round(),
+        photo: j['photo'] ?? '',
+      );
+}
+
 class Shop {
   final String id;
   final String name;
@@ -26,6 +55,9 @@ class Shop {
   /// Kartochka fonida aylanadigan mahsulot rasmlari (har mahsulotdan bittadan)
   final List<String> preview;
 
+  /// Shu rasmlarning mahsulot ma'lumoti: nom va narx ham kartochkada chiqadi
+  final List<ShopPreviewItem> previewItems;
+
   Shop({
     required this.id,
     required this.name,
@@ -47,7 +79,26 @@ class Shop {
     this.followers = 0,
     this.following = false,
     this.preview = const [],
+    this.previewItems = const [],
   });
+
+  /// Eski server faqat `preview` (rasm ro'yxati) qaytaradi — o'shanda ham
+  /// karusel ishlashi uchun rasmlar mahsulotsiz elementga o'raladi.
+  static List<ShopPreviewItem> _previewItems(Map<String, dynamic> j) {
+    final items = j['previewItems'];
+    if (items is List && items.isNotEmpty) {
+      return items
+          .whereType<Map>()
+          .map((e) => ShopPreviewItem.fromJson(e.cast<String, dynamic>()))
+          .where((e) => e.photo.isNotEmpty)
+          .toList();
+    }
+    return (j['preview'] as List?)
+            ?.whereType<String>()
+            .map((p) => ShopPreviewItem(photo: p))
+            .toList() ??
+        const [];
+  }
 
   factory Shop.fromJson(Map<String, dynamic> j) {
     final loc = j['location'];
@@ -72,6 +123,7 @@ class Shop {
       followers: (j['followers'] as num?)?.toInt() ?? 0,
       following: j['following'] == true,
       preview: (j['preview'] as List?)?.whereType<String>().toList() ?? const [],
+      previewItems: _previewItems(j),
     );
   }
 }
@@ -159,6 +211,11 @@ class Order {
   final double? routeKm; // do'kondan xaridorgacha taxminiy yo'l, km
   final String courierName;
   final String courierPhone;
+
+  /// Haydovchi haqida xaridor ko'radigan ma'lumot: rasmi, mashinasi, raqami
+  final String? courierPhoto;
+  final String? courierCarPhoto;
+  final String courierPlate;
   final DateTime? pickedAt;
   final DateTime? deliveredAt;
 
@@ -185,6 +242,9 @@ class Order {
     this.routeKm,
     this.courierName = '',
     this.courierPhone = '',
+    this.courierPhoto,
+    this.courierCarPhoto,
+    this.courierPlate = '',
     this.pickedAt,
     this.deliveredAt,
   });
@@ -214,6 +274,9 @@ class Order {
         routeKm: (j['routeKm'] as num?)?.toDouble(),
         courierName: j['courierName'] ?? '',
         courierPhone: j['courierPhone'] ?? '',
+        courierPhoto: j['courierPhoto'],
+        courierCarPhoto: j['courierCarPhoto'],
+        courierPlate: j['courierPlate'] ?? '',
         pickedAt: DateTime.tryParse(j['pickedAt'] ?? ''),
         deliveredAt: DateTime.tryParse(j['deliveredAt'] ?? ''),
       );
@@ -231,6 +294,9 @@ class Courier {
   final String region;
   final String plate;
   final String? photo;
+
+  /// Mashina rasmi — xaridor buyurtmani kim olib kelayotganini ko'radi
+  final String? carPhoto;
   final String vehicle; // foot | bike | moto | car
   final String vehicleType; // yuk: labo | damas | gazel | isuzu | fura
   final int capacityKg;
@@ -246,7 +312,7 @@ class Courier {
   final double? distanceKm;
   final int? estimatedPrice; // yuk tashuvchi: tanlangan yo'nalish uchun taxminiy narx, so'm
   final double? routeKm; // yuk tashuvchi: yo'nalish masofasi, km
-  Courier({required this.id, this.type = 'courier', required this.name, required this.phone, this.email = '', this.region = '', this.plate = '', this.photo, this.vehicle = 'foot', this.vehicleType = '', this.capacityKg = 0, this.regions = const [], this.pricePerKm = 0, this.basePrice = 0, this.about = '', this.online = false, this.lat, this.lon, this.deliveries = 0, this.rating = 5, this.distanceKm, this.estimatedPrice, this.routeKm});
+  Courier({required this.id, this.type = 'courier', required this.name, required this.phone, this.email = '', this.region = '', this.plate = '', this.photo, this.carPhoto, this.vehicle = 'foot', this.vehicleType = '', this.capacityKg = 0, this.regions = const [], this.pricePerKm = 0, this.basePrice = 0, this.about = '', this.online = false, this.lat, this.lon, this.deliveries = 0, this.rating = 5, this.distanceKm, this.estimatedPrice, this.routeKm});
   bool get isCargo => type == 'cargo';
   bool get hasTariff => basePrice > 0 || pricePerKm > 0;
 
@@ -261,6 +327,7 @@ class Courier {
       region: j['region'] ?? '',
       plate: j['plate'] ?? '',
       photo: j['photo'],
+      carPhoto: j['carPhoto'],
       vehicle: j['vehicle'] ?? 'foot',
       vehicleType: j['vehicleType'] ?? '',
       capacityKg: (j['capacityKg'] as num?)?.toInt() ?? 0,
@@ -279,7 +346,7 @@ class Courier {
     );
   }
 
-  Courier copyWith({bool? online, double? lat, double? lon, int? deliveries}) => Courier(id: id, type: type, name: name, phone: phone, email: email, region: region, plate: plate, photo: photo, vehicle: vehicle, vehicleType: vehicleType, capacityKg: capacityKg, regions: regions, pricePerKm: pricePerKm, basePrice: basePrice, about: about, online: online ?? this.online, lat: lat ?? this.lat, lon: lon ?? this.lon, deliveries: deliveries ?? this.deliveries, rating: rating, distanceKm: distanceKm, estimatedPrice: estimatedPrice, routeKm: routeKm);
+  Courier copyWith({bool? online, double? lat, double? lon, int? deliveries}) => Courier(id: id, type: type, name: name, phone: phone, email: email, region: region, plate: plate, photo: photo, carPhoto: carPhoto, vehicle: vehicle, vehicleType: vehicleType, capacityKg: capacityKg, regions: regions, pricePerKm: pricePerKm, basePrice: basePrice, about: about, online: online ?? this.online, lat: lat ?? this.lat, lon: lon ?? this.lon, deliveries: deliveries ?? this.deliveries, rating: rating, distanceKm: distanceKm, estimatedPrice: estimatedPrice, routeKm: routeKm);
 }
 
 /// Viloyatlararo yuk buyurtmasi
@@ -297,13 +364,18 @@ class CargoOrder {
   final String address;
   final String carrierName;
   final String carrierPhone;
+
+  /// Yukni kim olib ketishi: haydovchi rasmi, mashina rasmi va davlat raqami
+  final String? carrierPhoto;
+  final String? carrierCarPhoto;
+  final String carrierPlate;
   final DateTime createdAt;
   final int? price; // kelishilgan narx, so'm
   final double? distanceKm; // viloyat markazlari orasidagi taxminiy yo'l
   final int? suggestedPrice; // tashuvchi tarifi bo'yicha tavsiya narx
   final DateTime? acceptedAt;
   final DateTime? doneAt;
-  CargoOrder({required this.id, required this.status, this.kind = 'cargo', required this.fromRegion, required this.toRegion, this.date = '', this.cargo = '', this.weightKg = 0, this.customerName = '', this.phone = '', this.address = '', this.carrierName = '', this.carrierPhone = '', required this.createdAt, this.price, this.distanceKm, this.suggestedPrice, this.acceptedAt, this.doneAt});
+  CargoOrder({required this.id, required this.status, this.kind = 'cargo', required this.fromRegion, required this.toRegion, this.date = '', this.cargo = '', this.weightKg = 0, this.customerName = '', this.phone = '', this.address = '', this.carrierName = '', this.carrierPhone = '', this.carrierPhoto, this.carrierCarPhoto, this.carrierPlate = '', required this.createdAt, this.price, this.distanceKm, this.suggestedPrice, this.acceptedAt, this.doneAt});
   factory CargoOrder.fromJson(Map<String, dynamic> j) => CargoOrder(
         id: j['id'] ?? j['_id'] ?? '',
         status: j['status'] ?? 'new',
@@ -318,6 +390,9 @@ class CargoOrder {
         address: j['address'] ?? '',
         carrierName: j['carrierName'] ?? '',
         carrierPhone: j['carrierPhone'] ?? '',
+        carrierPhoto: j['carrierPhoto'],
+        carrierCarPhoto: j['carrierCarPhoto'],
+        carrierPlate: j['carrierPlate'] ?? '',
         createdAt: DateTime.tryParse(j['createdAt'] ?? '') ?? DateTime.now(),
         price: (j['price'] as num?)?.round(),
         distanceKm: (j['distanceKm'] as num?)?.toDouble(),

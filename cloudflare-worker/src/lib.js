@@ -526,6 +526,8 @@ export function serializeOrder(order) {
     shopLocation: order.shop_lat != null && order.shop_lon != null ? { lat: num(order.shop_lat), lon: num(order.shop_lon), address: order.shop_address || '' } : null,
     location: order.lat != null && order.lon != null ? { lat: num(order.lat), lon: num(order.lon) } : null,
     courierName: order.courier_name || '', courierPhone: order.courier_phone || '',
+    // Xaridor buyurtmani kim olib kelayotganini ko'radi: rasmi, mashinasi va raqami
+    courierPhoto: order.courier_photo || null, courierCarPhoto: order.courier_car_photo || null, courierPlate: order.courier_plate || '',
     deliveryFee: order.delivery_fee != null ? num(order.delivery_fee) : null, routeKm: order.route_km != null ? num(order.route_km) : null,
     pickedAt: order.picked_at || null, deliveredAt: order.delivered_at || null,
   };
@@ -534,6 +536,7 @@ export function serializeOrder(order) {
 export function serializeCourier(courier, extra = {}) {
   return {
     id: courier.id, type: courier.type, name: courier.name, phone: courier.phone || '', email: courier.email || '', login: courier.login || '', photo: courier.photo || null,
+    carPhoto: courier.car_photo || null,
     firstName: courier.first_name || '', lastName: courier.last_name || '', region: courier.region || '', plate: courier.plate || '',
     emailVerified: Boolean(courier.email_verified_at), active: bool(courier.active), vehicle: courier.vehicle || 'car', vehicleType: courier.vehicle_type || '',
     capacityKg: num(courier.capacity_kg), regions: parseList(courier.regions), pricePerKm: num(courier.price_per_km), basePrice: num(courier.base_price),
@@ -559,6 +562,8 @@ export function serializeCargo(order) {
     id: order.id, status: order.status, kind: order.kind, fromRegion: order.from_region || '', toRegion: order.to_region || '', date: order.date || '', cargo: order.cargo || '',
     weightKg: num(order.weight_kg), customerName: order.customer_name || '', phone: order.phone || '', address: order.address || '',
     carrierName: order.carrier_name || '', carrierPhone: order.carrier_phone || '', carrierId: order.carrier_id || null, createdAt: order.created_at,
+    // Mijoz yukini kim olib ketayotganini ko'radi
+    carrierPhoto: order.carrier_photo || null, carrierCarPhoto: order.carrier_car_photo || null, carrierPlate: order.carrier_plate || '',
     price: order.price != null ? num(order.price) : null, distanceKm: km,
     suggestedPrice: tariffPrice(order.carrier_base, order.carrier_per_km, km), acceptedAt: order.accepted_at || null, doneAt: order.done_at || null,
   };

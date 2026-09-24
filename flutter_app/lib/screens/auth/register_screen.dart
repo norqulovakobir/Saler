@@ -67,6 +67,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final regions = <String>[];
   String? photo;
 
+  /// Mashina rasmi: xaridor buyurtmani kim olib kelayotganini ko'radi
+  String? carPhoto;
+
   int step = 0;
   bool busy = false;
   bool hidePass = true;
@@ -119,11 +122,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
     if (courier && step == 1) {
       if (region == null) return tr('Ishlaydigan viloyatingizni tanlang');
+      final needCar = vehicle == 'moto' || vehicle == 'car';
+      if (needCar && plate.text.trim().replaceAll(' ', '').length < 5) return tr('Mashina davlat raqamini kiriting');
+      if (photo == null) return tr("O'z rasmingizni qo'shing");
+      if (needCar && carPhoto == null) return tr("Mashinangiz rasmini qo'shing");
       return null;
     }
     if (cargo && step == 1) {
       if (plate.text.trim().replaceAll(' ', '').length < 5) return tr('Mashina davlat raqamini kiriting');
       if ((int.tryParse(capacity.text.replaceAll(RegExp(r'\D'), '')) ?? 0) < 50) return tr("Yuk sig'imini kiriting (kg)");
+      if (photo == null) return tr("O'z rasmingizni qo'shing");
+      if (carPhoto == null) return tr("Mashinangiz rasmini qo'shing");
       return null;
     }
     if (cargo && step == 2) {
@@ -198,6 +207,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'region': region,
         'plate': plate.text.trim(),
         if (photo != null) 'photo': photo,
+        if (carPhoto != null) 'carPhoto': carPhoto,
       };
     }
     return {
@@ -211,6 +221,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       'regions': regions,
       'region': regions.isNotEmpty ? regions.first : null,
       if (photo != null) 'photo': photo,
+      if (carPhoto != null) 'carPhoto': carPhoto,
     };
   }
 
@@ -255,18 +266,30 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   // ---------- rasm ----------
-  Future<void> _pickImage({required bool isLogo}) async {
+  /// [target]: 'logo' (do'kon), 'photo' (haydovchi) yoki 'car' (mashina).
+  /// Mashina rasmi xaridorga kattaroq ko'rsatiladi, shuning uchun u
+  /// mahsulot rasmi sifatida olinadi.
+  Future<void> _pickImage(String target) async {
     final src = await askImageSource(context);
     if (src == null) return;
     try {
-      final f = await PhotoPick.logo(src);
+      final f = target == 'car' ? await PhotoPick.product(src) : await PhotoPick.logo(src);
       if (f == null) return;
       final data = await Api.instance.uploadImage(
         await f.readAsBytes(),
         mime: Api.imageMimeFor(f),
       );
       if (!mounted) return;
-      setState(() => isLogo ? logo = data : photo = data);
+      setState(() {
+        error = null;
+        if (target == 'logo') {
+          logo = data;
+        } else if (target == 'car') {
+          carPhoto = data;
+        } else {
+          photo = data;
+        }
+      });
     } catch (e) {
       if (mounted) setState(() => error = tr("Rasmni yuklab bo'lmadi"));
     }
@@ -389,7 +412,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               OutlinedButton.icon(
-                onPressed: () => _pickImage(isLogo: true),
+                onPressed: () => _pickImage('logo'),
                 icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
                 label: Text(logo == null ? tr("Rasm qo'shish") : tr("O'zgartirish")),
               ),
@@ -473,7 +496,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
           AuthField(controller: plate, label: tr('Davlat raqami'), icon: Icons.pin_outlined, hint: '01 A 123 BC', caps: TextCapitalization.characters),
         AuthLabel(tr('Ish viloyati')),
         RegionPicker(value: region, label: tr('Viloyat'), onPick: (r) => setState(() => region = r)),
-        AuthLabel(tr('Rasm')),
+        ..._driverPhotos(needCar: vehicle == 'moto' || vehicle == 'car'),
+      ];
+
+  /// Haydovchi rasmi va mashina rasmi — kuryer va yuk tashuvchi uchun bir xil.
+  /// Xaridor buyurtmani kim olib kelayotganini ko'rishi kerak, shuning uchun
+  /// ikkalasi ham majburiy.
+  List<Widget> _driverPhotos({required bool needCar}) => [
+        AuthLabel(tr('Rasmingiz')),
         Row(children: [
           CircleAvatar(
             radius: 30,
@@ -484,11 +514,39 @@ class _RegisterScreenState extends State<RegisterScreen> {
           const SizedBox(width: 12),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              OutlinedButton.icon(onPressed: () => _pickImage(isLogo: false), icon: const Icon(Icons.add_a_photo_outlined, size: 18), label: Text(photo == null ? tr("Rasm qo'shish") : tr("O'zgartirish"))),
-              Text(tr('Ixtiyoriy — xaridorlar sizni tanishi uchun'), style: TextStyle(fontSize: 11.5, color: context.p.muted, fontWeight: FontWeight.w600)),
+              OutlinedButton.icon(onPressed: () => _pickImage('photo'), icon: const Icon(Icons.add_a_photo_outlined, size: 18), label: Text(photo == null ? tr("Rasm qo'shish") : tr("O'zgartirish"))),
+              Text(tr('Xaridor sizni tanishi uchun kerak'), style: TextStyle(fontSize: 11.5, color: context.p.muted, fontWeight: FontWeight.w600)),
             ]),
           ),
         ]),
+        if (needCar) ...[
+          const SizedBox(height: 14),
+          AuthLabel(tr('Mashinangiz rasmi')),
+          GestureDetector(
+            onTap: () => _pickImage('car'),
+            child: Container(
+              height: 132,
+              width: double.infinity,
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                color: context.p.bg,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: context.p.border),
+              ),
+              child: carPhoto == null
+                  ? Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      Icon(Icons.directions_car_filled_outlined, size: 30, color: context.p.muted),
+                      const SizedBox(height: 6),
+                      Text(tr('Mashina rasmini qo\'shing'), style: TextStyle(fontSize: 12.5, color: context.p.muted, fontWeight: FontWeight.w700)),
+                    ])
+                  : Image(image: uploadedImage(carPhoto!), fit: BoxFit.cover),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(tr('Xaridor mashinangizni va raqamini ko\'radi'), style: TextStyle(fontSize: 11.5, color: context.p.muted, fontWeight: FontWeight.w600)),
+          ),
+        ],
         const SizedBox(height: 16),
       ];
 
@@ -516,6 +574,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           action: TextInputAction.done,
           onSubmit: _next,
         ),
+        ..._driverPhotos(needCar: true),
       ];
 
   List<Widget> _cargoTariff() => [

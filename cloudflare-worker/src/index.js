@@ -15,10 +15,12 @@ const SHOP_STATS = `SELECT s.*,
   FROM shops s`;
 
 const ORDER_SELECT = `SELECT o.*, s.name AS shop_name, s.phone AS shop_phone, s.lat AS shop_lat, s.lon AS shop_lon,
-  s.address AS shop_address, c.name AS courier_name, c.phone AS courier_phone
+  s.address AS shop_address, c.name AS courier_name, c.phone AS courier_phone,
+  c.photo AS courier_photo, c.car_photo AS courier_car_photo, c.plate AS courier_plate
   FROM orders o JOIN shops s ON s.id=o.shop_id LEFT JOIN couriers c ON c.id=o.courier_id`;
 
 const CARGO_SELECT = `SELECT x.*, c.name AS carrier_name, c.phone AS carrier_phone,
+  c.photo AS carrier_photo, c.car_photo AS carrier_car_photo, c.plate AS carrier_plate,
   c.base_price AS carrier_base, c.price_per_km AS carrier_per_km
   FROM cargo_orders x LEFT JOIN couriers c ON c.id=x.carrier_id`;
 
@@ -188,16 +190,24 @@ async function courierSignup(env, input) {
   let regions = [];
   const basePrice = Math.max(0, Math.round(num(input.basePrice)));
   const pricePerKm = Math.max(0, Math.round(num(input.pricePerKm)));
-  if (input.photo && !str(input.photo).startsWith('data:image/') && !isMediaRef(input.photo)) {
-    throw new HttpError(400, "Rasm bo'lishi kerak", { field: 'photo' });
-  }
+  // Xaridor buyurtmani kim olib kelayotganini ko'rishi kerak, shuning uchun
+  // haydovchining rasmi majburiy; mashinali bo'lsa mashina rasmi ham.
+  const okImage = (value) => str(value).startsWith('data:image/') || isMediaRef(value);
+  if (!input.photo) throw new HttpError(400, "O'z rasmingizni qo'shing", { field: 'photo' });
+  if (!okImage(input.photo)) throw new HttpError(400, "Rasm bo'lishi kerak", { field: 'photo' });
+  if (input.carPhoto && !okImage(input.carPhoto)) throw new HttpError(400, "Mashina rasmi rasm bo'lishi kerak", { field: 'carPhoto' });
+  const needsCar = type === 'cargo' || input.vehicle === 'moto' || input.vehicle === 'car';
+  if (needsCar && !input.carPhoto) throw new HttpError(400, 'Mashinangiz rasmini qo\'shing', { field: 'carPhoto' });
 
   if (type === 'courier') {
     if (!REGIONS.includes(region)) throw new HttpError(400, 'Ishlaydigan viloyatingizni tanlang', { field: 'region' });
     if (!VEHICLES.includes(input.vehicle)) throw new HttpError(400, 'Transportingizni tanlang', { field: 'vehicle' });
     vehicle = input.vehicle;
     regions = [region];
-    if (vehicle === 'moto' || vehicle === 'car') plate = str(input.plate).trim().toUpperCase().replace(/\s+/g, ' ').slice(0, 12);
+    if (vehicle === 'moto' || vehicle === 'car') {
+      plate = str(input.plate).trim().toUpperCase().replace(/\s+/g, ' ').slice(0, 12);
+      if (plate.replace(/\s/g, '').length < 5) throw new HttpError(400, 'Mashina davlat raqamini kiriting', { field: 'plate' });
+    }
   } else {
     if (!VEHICLE_TYPES.includes(input.vehicleType)) throw new HttpError(400, 'Mashina turini tanlang', { field: 'vehicleType' });
     vehicleType = input.vehicleType;
@@ -356,12 +366,13 @@ async function registerCourier(env, context, input) {
   const id = newId('c_');
   const stamp = now();
   const photo = input.photo ? await storeDataUri(env, input.photo) : null;
+  const carPhoto = input.carPhoto ? await storeDataUri(env, input.carPhoto) : null;
   await run(env, `INSERT INTO couriers(
-    id,type,name,first_name,last_name,phone,email,email_verified_at,login,pass_hash,photo,region,vehicle,vehicle_type,plate,capacity_kg,
+    id,type,name,first_name,last_name,phone,email,email_verified_at,login,pass_hash,photo,car_photo,region,vehicle,vehicle_type,plate,capacity_kg,
     regions,price_per_km,base_price,created_at,last_login_at
-  ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+  ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
     id, signup.type, signup.firstName + ' ' + signup.lastName, signup.firstName, signup.lastName, signup.phone, signup.email, stamp,
-    signup.login, await hashPassword(signup.password), photo, signup.region, signup.vehicle, signup.vehicleType, signup.plate,
+    signup.login, await hashPassword(signup.password), photo, carPhoto, signup.region, signup.vehicle, signup.vehicleType, signup.plate,
     signup.capacityKg, JSON.stringify(signup.regions), signup.pricePerKm, signup.basePrice, stamp, stamp,
   ]);
   await consumeCode(env, signup.email, signup.type);
@@ -460,7 +471,7 @@ async function withPreviews(env, shops) {
   if (!shops.length) return [];
   const ids = shops.map((s) => s.id);
   const marks = ids.map(() => '?').join(',');
-  const rows = await all(env, `SELECT shop_id, photos FROM products
+  const rows = await all(env, `SELECT id, shop_id, name, price, photos FROM products
     WHERE active=1 AND shop_id IN (${marks}) AND photos <> '[]'
     ORDER BY created_at DESC LIMIT ?`, [...ids, ids.length * PREVIEW_PER_SHOP * 3]);
   const byShop = new Map();
@@ -470,9 +481,15 @@ async function withPreviews(env, shops) {
     // Har mahsulotdan faqat birinchi rasm — karta bir do'konning turli
     // mahsulotlarini ko'rsatsin, bitta mahsulotning rakurslarini emas.
     const first = parseList(row.photos)[0];
-    if (first) byShop.set(row.shop_id, [...list, first]);
+    if (!first) continue;
+    // Kartochka rasm bilan birga mahsulot nomi va narxini ham ko'rsatadi
+    byShop.set(row.shop_id, [...list, { id: row.id, name: row.name || '', price: num(row.price), photo: first }]);
   }
-  return shops.map((shop) => serializeShop(shop, { preview: byShop.get(shop.id) || [] }));
+  return shops.map((shop) => {
+    const items = byShop.get(shop.id) || [];
+    // `preview` eski ilova versiyalari uchun qoldirildi
+    return serializeShop(shop, { preview: items.map((i) => i.photo), previewItems: items });
+  });
 }
 
 /// "Sizga yaqin": joylashuvga ruxsat bergan xaridorga yaqin-atrofdagi
@@ -957,6 +974,13 @@ async function updateCourierProfile(env, context, input) {
   const values = [];
   const set = (column, value) => { columns.push(column + '=?'); values.push(value); };
   if (input.photo != null) set('photo', await storeDataUri(env, input.photo));
+  // Mashina rasmi va davlat raqami ham profildan o'zgartiriladi
+  if (input.carPhoto != null) set('car_photo', await storeDataUri(env, input.carPhoto));
+  if (input.plate != null) {
+    const plate = str(input.plate).trim().toUpperCase().replace(/\s+/g, ' ').slice(0, 12);
+    if (plate && plate.replace(/\s/g, '').length < 5) throw new HttpError(400, "Davlat raqami noto'g'ri", { field: 'plate' });
+    set('plate', plate);
+  }
   if (input.name != null) {
     const name = str(input.name).trim().slice(0, 80);
     if (!name) throw new HttpError(400, "Ism bo'sh");

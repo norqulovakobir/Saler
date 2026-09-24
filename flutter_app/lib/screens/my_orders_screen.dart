@@ -111,6 +111,15 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
                           Text('  ·  ', style: TextStyle(color: p.muted)),
                           PriceText(o.price, size: 13)
                         ]),
+                        // Buyurtmani kim olib kelayotgani: rasmi, mashinasi, raqami
+                        DriverCard(
+                          title: tr('Buyurtmangizni olib keladi'),
+                          name: o.courierName,
+                          phone: o.courierPhone,
+                          photo: o.courierPhoto,
+                          carPhoto: o.courierCarPhoto,
+                          plate: o.courierPlate,
+                        ),
                         if (o.shopPhone.isNotEmpty)
                           Padding(
                             padding: const EdgeInsets.only(top: 10),

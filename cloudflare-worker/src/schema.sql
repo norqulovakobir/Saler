@@ -177,6 +177,9 @@ CREATE TABLE IF NOT EXISTS couriers (
   login TEXT COLLATE NOCASE NOT NULL UNIQUE,
   pass_hash TEXT NOT NULL,
   photo TEXT,
+  -- Mashina rasmi: xaridor buyurtmani kimga berayotganini ko'rishi uchun
+  -- haydovchining rasmi bilan birga ko'rsatiladi
+  car_photo TEXT,
   region TEXT NOT NULL DEFAULT '',
   vehicle TEXT NOT NULL DEFAULT 'car',
   vehicle_type TEXT NOT NULL DEFAULT '',

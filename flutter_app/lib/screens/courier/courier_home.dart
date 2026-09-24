@@ -1719,18 +1719,50 @@ class _CourierEditSheetState extends State<_CourierEditSheet> {
   late final capacity = TextEditingController(text: c.capacityKg > 0 ? '${c.capacityKg}' : '');
   late final base = TextEditingController(text: c.basePrice > 0 ? '${c.basePrice}' : '');
   late final km = TextEditingController(text: c.pricePerKm > 0 ? '${c.pricePerKm}' : '');
+  late final plate = TextEditingController(text: c.plate);
   late String vehicle = c.vehicle;
   late String vehicleType = c.vehicleType;
   late final regions = List<String>.from(c.regions);
+
+  /// Mashina rasmi — xaridor buyurtmani kim olib kelayotganini ko'radi
+  late String? carPhoto = c.carPhoto;
+  bool carBusy = false;
   bool saving = false;
   String? err;
 
+  /// Mashinali kuryer va yuk tashuvchida raqam va mashina rasmi so'raladi
+  bool get needsCar => c.isCargo || vehicle == 'moto' || vehicle == 'car';
+
   @override
   void dispose() {
-    for (final x in [name, phone, email, about, capacity, base, km]) {
+    for (final x in [name, phone, email, about, capacity, base, km, plate]) {
       x.dispose();
     }
     super.dispose();
+  }
+
+  Future<void> _pickCar() async {
+    final src = await askImageSource(context);
+    if (src == null) return;
+    final f = await PhotoPick.product(src);
+    if (f == null) return;
+    setState(() => carBusy = true);
+    try {
+      final ref = await Api.instance.uploadImage(await f.readAsBytes(), mime: Api.imageMimeFor(f));
+      if (!mounted) return;
+      setState(() {
+        carPhoto = ref;
+        carBusy = false;
+        err = null;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          carBusy = false;
+          err = _errText(e);
+        });
+      }
+    }
   }
 
   Future<void> save() async {
@@ -1752,6 +1784,9 @@ class _CourierEditSheetState extends State<_CourierEditSheet> {
         if (c.isCargo) 'vehicleType': vehicleType,
         if (c.isCargo) 'capacityKg': int.tryParse(capacity.text) ?? 0,
         if (c.isCargo) 'regions': regions,
+        // Xaridor ko'radigan ma'lumot: davlat raqami va mashina rasmi
+        if (needsCar) 'plate': plate.text.trim(),
+        if (needsCar && carPhoto != null) 'carPhoto': carPhoto,
       });
       AppState.instance.courier = Courier.fromJson(r['courier']).copyWith(online: AppState.instance.courier?.online ?? c.online);
       AppState.instance.refresh();
@@ -1804,6 +1839,45 @@ class _CourierEditSheetState extends State<_CourierEditSheet> {
               for (final v in ['foot', 'bike', 'moto', 'car'])
                 ChoiceChip(selected: vehicle == v, avatar: Icon(vehicleIcon(v), size: 16, color: vehicle == v ? p.onDark : p.text), label: Text(vehicleName(v)), onSelected: (_) => setState(() => vehicle = v)),
             ]),
+          if (needsCar) ...[
+            const SizedBox(height: 12),
+            TextField(
+              controller: plate,
+              textCapitalization: TextCapitalization.characters,
+              decoration: InputDecoration(labelText: tr('Davlat raqami'), hintText: '01 A 123 BC'),
+            ),
+            const SizedBox(height: 10),
+            Text(tr('Mashinangiz rasmi'), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: p.muted)),
+            const SizedBox(height: 6),
+            GestureDetector(
+              onTap: carBusy ? null : _pickCar,
+              child: Container(
+                height: 132,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(color: p.bg, borderRadius: BorderRadius.circular(16), border: Border.all(color: p.border)),
+                child: carBusy
+                    ? Center(child: _spinner(p.muted, size: 20))
+                    : carPhoto == null
+                        ? Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                            Icon(Icons.directions_car_filled_outlined, size: 30, color: p.muted),
+                            const SizedBox(height: 6),
+                            Text(tr("Mashina rasmini qo'shing"), style: TextStyle(fontSize: 12.5, color: p.muted, fontWeight: FontWeight.w700)),
+                          ])
+                        : Stack(fit: StackFit.expand, children: [
+                            Image(image: uploadedImage(carPhoto!), fit: BoxFit.cover),
+                            Positioned(
+                              right: 8,
+                              bottom: 8,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                decoration: BoxDecoration(color: const Color(0xBF14161A), borderRadius: BorderRadius.circular(999)),
+                                child: Text(tr("O'zgartirish"), style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w700)),
+                              ),
+                            ),
+                          ]),
+              ),
+            ),
+          ],
           const SizedBox(height: 14),
           Text(tr('Tarif'), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: p.muted)),
           const SizedBox(height: 6),
@@ -2031,6 +2105,15 @@ class _ServiceProfileCard extends StatelessWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [Icon(Icons.badge_outlined, size: 19, color: p.accentText), const SizedBox(width: 8), Text(tr('Xizmat profili'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800))]),
         const SizedBox(height: 7),
+        // Xaridor ko'radigan mashina rasmi
+        if (c.carPhoto != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: SizedBox(height: 130, width: double.infinity, child: Image(image: uploadedImage(c.carPhoto!), fit: BoxFit.cover)),
+            ),
+          ),
         for (final r in rows)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 7),

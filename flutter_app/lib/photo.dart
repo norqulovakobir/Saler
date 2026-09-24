@@ -2,23 +2,20 @@ import 'package:image_picker/image_picker.dart';
 
 /// Rasm tanlash sozlamalari — bitta joyda.
 ///
-/// Rasmlar hozir Cloudflare D1 bazasida saqlanadi (R2 obyekt ombori yoqilmagan).
-/// D1 ning bepul chegarasi 500 MB, shuning uchun har bir rasmning hajmi
-/// muhim: 1280px/85 sifatida bitta rasm ~300 KB, 1080px/72 da esa ~120 KB
-/// bo'ladi — ya'ni o'sha bepul joyga taxminan uch baravar ko'p rasm sig'adi.
-/// Ko'z bilan farq deyarli sezilmaydi, chunki telefonda rasm baribir
-/// ekran kengligida ko'rsatiladi.
-///
-/// R2 yoqilganda bu qiymatlarni oshirish mumkin (`/api/health` da
-/// `"media":"r2"` bo'ladi).
+/// Rasmlar R2 obyekt omborida saqlanadi (`/api/health` da
+/// `"media":{"store":"r2"}`), ya'ni D1 ning 500 MB chegarasi endi to'siq
+/// emas. Shuning uchun sifat oshirildi: 1080px/72 da rasm Reels'da va
+/// do'kon kartochkasida hira ko'rinardi — ekran kengligiga cho'zilganda
+/// siqilish izlari sezilib qolardi.
 class PhotoPick {
-  /// Mahsulot rasmlari: katalogda va mahsulot sahifasida to'liq ko'rinadi
-  static const productWidth = 1080.0;
-  static const productQuality = 72;
+  /// Mahsulot rasmlari: Reels'da butun ekranni egallaydi, shuning uchun
+  /// telefon ekrani kengligidan kattaroq olinadi
+  static const productWidth = 1600.0;
+  static const productQuality = 90;
 
   /// Logo va avatar: doim kichik doirada ko'rsatiladi
-  static const logoWidth = 400.0;
-  static const logoQuality = 78;
+  static const logoWidth = 512.0;
+  static const logoQuality = 88;
 
   /// Mahsulot uchun bitta rasm
   static Future<XFile?> product(ImageSource source) =>
