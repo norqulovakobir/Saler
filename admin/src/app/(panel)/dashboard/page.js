@@ -7,7 +7,7 @@ import { Avatar, Badge, Card, ErrorBox, PageTitle, Stat, StatusBadge, Table } fr
 import { AreaSeries, Bars, Donut } from '@/components/charts';
 import { useApi, useDebounced } from '@/lib/hooks';
 import { photoUrl } from '@/lib/api';
-import { ago, money, moneyShort, num, shortDay } from '@/lib/format';
+import { ago, bytes, money, moneyShort, num, shortDay } from '@/lib/format';
 
 /** Bosh sahifadagi do'kon qidiruvi: nomi, login, telefon yoki egasi bo'yicha */
 function ShopSearch() {
@@ -65,6 +65,40 @@ function Registrations({ r, loading }) {
   );
 }
 
+/** Ombor holati: to'liq grafiklar Tizim sahifasida, bu yerda qisqacha */
+function StorageStrip() {
+  const { data: s } = useApi('/system', { refreshMs: 60000 });
+  const rows = s ? [
+    { label: 'Baza (D1)', pct: s.d1.percent, used: bytes(s.d1.used), limit: bytes(s.d1.limit) },
+    { label: 'Rasmlar (R2)', pct: s.r2.percent, used: bytes(s.r2.used), limit: bytes(s.r2.limit) },
+    { label: 'Bugungi yozuv', pct: s.writes.percent, used: num(s.writes.today), limit: num(s.writes.limit) },
+  ] : [];
+  return (
+    <Card title="Ombor" sub="Bepul rejadan qancha band" className="mb-4"
+      action={<Link href="/system" className="btn btn-sm btn-ghost">Batafsil <ArrowUpRight size={13} /></Link>}>
+      {!s ? <div className="skeleton" style={{ height: 76 }} /> : (
+        <div className="grid gap-4 md:grid-cols-3">
+          {rows.map((r) => (
+            <div key={r.label}>
+              <div className="flex items-baseline justify-between gap-2 text-xs">
+                <span className="text-muted">{r.label}</span>
+                <span className="tabular-nums"><b className="font-semibold">{r.used}</b><span className="text-muted"> / {r.limit}</span></span>
+              </div>
+              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-panel-2">
+                <div className="h-full rounded-full" style={{
+                  width: `${Math.max(r.pct > 0 ? 1.5 : 0, Math.min(100, r.pct))}%`,
+                  background: r.pct >= 90 ? '#ef4444' : r.pct >= 70 ? '#f59e0b' : '#10b981',
+                }} />
+              </div>
+              <div className="mt-1 text-[11px] text-muted tabular-nums">{r.pct}%</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export default function Dashboard() {
   const [days, setDays] = useState(30);
   const ov = useApi('/overview', { refreshMs: 60000 });
@@ -83,6 +117,7 @@ export default function Dashboard() {
       </>} />
       <ErrorBox error={ov.error} retry={ov.reload} />
 
+      <StorageStrip />
       <Registrations r={o?.registrations} loading={L} />
       <ShopSearch />
 

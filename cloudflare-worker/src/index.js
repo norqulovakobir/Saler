@@ -1518,24 +1518,98 @@ async function adminSetActive(env, kind, id, active) {
   return { ok: true, active };
 }
 
+/// Cloudflare bepul rejasining chegaralari. Panel "qancha to'lgan" ni shu
+/// qiymatlarga nisbatan ko'rsatadi.
+const D1_LIMIT_BYTES = 5 * 1024 * 1024 * 1024;
+const R2_LIMIT_BYTES = 10 * 1024 * 1024 * 1024;
+const D1_DAILY_WRITES = 100000;
+const D1_DAILY_READS = 5000000;
+
+/// Bazadagi barcha jadvallar — qaysi biri joyni egallayotgani ko'rinsin.
+const COUNTED_TABLES = ['users', 'sessions', 'shops', 'products', 'orders', 'couriers',
+  'cargo_orders', 'follows', 'product_likes', 'product_views', 'reel_events',
+  'chat_messages', 'user_searches', 'notifications', 'media_uploads', 'email_codes',
+  'admin_sessions'];
+
+/// Bazaga eng ko'p yozadigan jadvallar: kunlik 100k yozish chegarasi hajmdan
+/// oldin shular tufayli tugaydi, shuning uchun alohida kuzatiladi.
+const WRITE_TABLES = ['product_views', 'reel_events', 'user_searches', 'chat_messages',
+  'orders', 'media_uploads', 'users', 'sessions', 'follows', 'product_likes',
+  'notifications'];
+
+const percentOf = (used, limit) => (limit > 0 ? Math.round((used / limit) * 10000) / 100 : 0);
+
 async function adminSystem(env) {
-  const [tables, objects, media] = await Promise.all([
-    one(env, "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table'"),
-    one(env, 'SELECT (SELECT COUNT(*) FROM shops)+(SELECT COUNT(*) FROM products)+(SELECT COUNT(*) FROM orders)+(SELECT COUNT(*) FROM users)+(SELECT COUNT(*) FROM couriers) AS n'),
-    // Rasmning o'zi R2 da; hajm va soni media_uploads metadatasidan olinadi.
+  const today = now().slice(0, 10);
+  const from = new Date(Date.now() - 13 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const countSql = 'SELECT ' + COUNTED_TABLES.map((t) => `(SELECT COUNT(*) FROM ${t}) AS ${t}`).join(', ');
+  // Kunlik yozuv oqimi. Bitta UNION ALL bo'lib yozilmaydi: D1 birlashgan
+  // SELECT terminlari soniga chek qo'yadi (SQLITE_ERROR 7500). batch() esa
+  // hammasini bitta murojaatda yuboradi va natijalar JS'da qo'shiladi.
+  const [counts, daily, media, probe] = await Promise.all([
+    one(env, countSql),
+    env.DB.batch(WRITE_TABLES.map((t) => env.DB
+      .prepare(`SELECT substr(created_at,1,10) AS d, COUNT(*) AS n FROM ${t} WHERE created_at >= ? GROUP BY 1`)
+      .bind(from))),
     one(env, 'SELECT COUNT(*) AS files, COALESCE(SUM(bytes),0) AS bytes FROM media_uploads'),
+    // D1 har so'rov javobida bazaning joriy hajmini qaytaradi — alohida
+    // hisoblash shart emas, eng arzon so'rov yetadi.
+    run(env, 'SELECT 1'),
   ]);
+
+  const tables = COUNTED_TABLES
+    .map((name) => ({ name, rows: num(counts && counts[name]) }))
+    .sort((a, b) => b.rows - a.rows);
+  const rows = tables.reduce((sum, t) => sum + t.rows, 0);
+  const d1Used = num(probe && probe.meta && probe.meta.size_after);
+  const r2Used = num(media && media.bytes);
+
+  // Bo'sh kunlar ham grafikda ko'rinsin, aks holda chiziq uziladi.
+  const byDay = new Map();
+  for (const part of daily || []) {
+    for (const row of part.results || []) {
+      const key = String(row.d);
+      byDay.set(key, (byDay.get(key) || 0) + num(row.n));
+    }
+  }
+  const series = [];
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    series.push({ date: d, writes: byDay.get(d) || 0 });
+  }
+
   return {
-    time: now(), uptime: 0, node: 'Cloudflare Workers', memory: { rss: 0, heapUsed: 0, heapTotal: 0 },
-    db: { dataSize: 0, objects: num(objects.n), collections: num(tables.n) },
-    uploads: {
-      files: num(media.files),
-      bytes: num(media.bytes),
-      storage: r2Enabled(env) ? 'Cloudflare R2 + edge cache' : 'R2 ulanmagan',
+    time: now(),
+    platform: 'Cloudflare Workers',
+    d1: {
+      name: 'saler-db',
+      used: d1Used,
+      limit: D1_LIMIT_BYTES,
+      percent: percentOf(d1Used, D1_LIMIT_BYTES),
+      rows,
+      tables,
     },
-    bot: null, email: { provider: 'Brevo', enabled: Boolean(env.BREVO_API_KEY), devCodes: false },
-    env: { groqModel: 'Free rule-based assistant', visionModel: '—', redis: false, port: 'Cloudflare', webappUrl: null },
-    platform: 'Cloudflare Workers', cpuLoad: [], logTail: [],
+    r2: {
+      name: 'saler-media',
+      enabled: r2Enabled(env),
+      used: r2Used,
+      limit: R2_LIMIT_BYTES,
+      percent: percentOf(r2Used, R2_LIMIT_BYTES),
+      files: num(media && media.files),
+    },
+    writes: {
+      today: byDay.get(today) || 0,
+      limit: D1_DAILY_WRITES,
+      percent: percentOf(byDay.get(today) || 0, D1_DAILY_WRITES),
+    },
+    reads: { limit: D1_DAILY_READS },
+    daily: series,
+    services: {
+      database: Boolean(env.DB),
+      media: r2Enabled(env) ? 'r2' : 'off',
+      email: Boolean(env.BREVO_API_KEY && env.BREVO_SENDER_EMAIL),
+      admin: Boolean(env.ADMIN_PASSWORD),
+    },
   };
 }
 

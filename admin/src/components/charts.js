@@ -1,5 +1,5 @@
 'use client';
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, PolarAngleAxis, RadialBar, RadialBarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useChartTheme } from '@/components/theme';
 import { num } from '@/lib/format';
 
@@ -130,6 +130,36 @@ export function Donut({ data, h = 200, nameKey = 'name', valueKey = 'value', cen
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/// Ombor to'lganligi: yarim doira gauge. Chegaraga yaqinlashgan sari rang
+/// yashildan sariqqa, keyin qizilga o'tadi — foizni o'qimasdan ham ko'rinadi.
+export function Gauge({ percent, h = 170, label, value, limit }) {
+  const p = useParts(false);
+  if (!p) return <Skel h={h} />;
+  const pct = Math.max(0, Math.min(100, Number(percent) || 0));
+  const tone = pct >= 90 ? 'c5' : pct >= 70 ? 'c4' : 'c3';
+  const fill = p.t[tone] || tone;
+  const rows = [{ name: label, value: pct, fill }];
+  return (
+    <div className="relative" style={{ height: h }}>
+      <ResponsiveContainer>
+        <RadialBarChart data={rows} startAngle={210} endAngle={-30} innerRadius="66%" outerRadius="100%" barSize={16}>
+          <PolarAngleAxis type="number" domain={[0, 100]} tick={false} />
+          <RadialBar dataKey="value" background={{ fill: p.t.panel2 }} cornerRadius={8} />
+        </RadialBarChart>
+      </ResponsiveContainer>
+      <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
+        <div>
+          <div className="text-2xl font-semibold tabular-nums leading-none" style={{ color: fill }}>
+            {pct < 0.01 && pct > 0 ? '<0.01' : pct}%
+          </div>
+          <div className="mt-1.5 text-[13px] font-medium tabular-nums">{value}</div>
+          {limit && <div className="mt-0.5 text-[10px] uppercase tracking-wide text-muted">{limit} dan</div>}
+        </div>
+      </div>
     </div>
   );
 }
