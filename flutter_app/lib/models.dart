@@ -23,6 +23,9 @@ class Shop {
   final int followers; // obunachilar soni
   final bool following; // joriy foydalanuvchi obuna bo'lganmi
 
+  /// Kartochka fonida aylanadigan mahsulot rasmlari (har mahsulotdan bittadan)
+  final List<String> preview;
+
   Shop({
     required this.id,
     required this.name,
@@ -43,6 +46,7 @@ class Shop {
     this.rank,
     this.followers = 0,
     this.following = false,
+    this.preview = const [],
   });
 
   factory Shop.fromJson(Map<String, dynamic> j) {
@@ -67,6 +71,7 @@ class Shop {
       ownerName: j['ownerName'],
       followers: (j['followers'] as num?)?.toInt() ?? 0,
       following: j['following'] == true,
+      preview: (j['preview'] as List?)?.whereType<String>().toList() ?? const [],
     );
   }
 }
