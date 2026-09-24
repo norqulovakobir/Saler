@@ -4,6 +4,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart' show XFile;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'config.dart';
 
@@ -217,6 +218,15 @@ class Api {
     final ref = data is Map ? data['ref']?.toString().trim() : null;
     if (ref == null || ref.isEmpty) throw ApiException("Rasm manzili olinmadi", response.statusCode);
     return ref;
+  }
+
+  /// Tanlangan faylning turi. Webda `XFile.path` blob URL bo'ladi va
+  /// kengaytmasi yo'q — u yerda faqat `mimeType` to'g'ri javob beradi,
+  /// aks holda PNG ham jpeg deb yuboriladi.
+  static String imageMimeFor(XFile file) {
+    final declared = (file.mimeType ?? '').toLowerCase().split(';').first.trim();
+    if (declared.startsWith('image/')) return declared;
+    return imageMimeForPath(file.path);
   }
 
   static String imageMimeForPath(String path) {

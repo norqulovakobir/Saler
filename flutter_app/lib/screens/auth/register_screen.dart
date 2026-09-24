@@ -263,7 +263,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       if (f == null) return;
       final data = await Api.instance.uploadImage(
         await f.readAsBytes(),
-        mime: Api.imageMimeForPath(f.path),
+        mime: Api.imageMimeFor(f),
       );
       if (!mounted) return;
       setState(() => isLogo ? logo = data : photo = data);
@@ -382,7 +382,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           Container(
             width: 64,
             height: 64,
-            decoration: BoxDecoration(color: context.p.bg, borderRadius: BorderRadius.circular(20), image: logo == null ? null : DecorationImage(image: MemoryImage(base64Decode(logo!.split(',').last)), fit: BoxFit.cover)),
+            decoration: BoxDecoration(color: context.p.bg, borderRadius: BorderRadius.circular(20), image: logo == null ? null : DecorationImage(image: uploadedImage(logo!), fit: BoxFit.cover)),
             child: logo == null ? Icon(Icons.image_outlined, color: context.p.muted) : null,
           ),
           const SizedBox(width: 12),
@@ -427,7 +427,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   onTap: (_, p) => _setPos(p),
                 ),
                 children: [
-                  TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'uz.saler.ai'),
+                  TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'uz.rydex.app'),
                   if (pos != null) MarkerLayer(markers: [Marker(point: pos!, width: 44, height: 52, child: Icon(Icons.location_on, color: context.p.danger, size: 44))]),
                 ],
               ),
@@ -478,7 +478,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           CircleAvatar(
             radius: 30,
             backgroundColor: context.p.bg,
-            backgroundImage: photo == null ? null : MemoryImage(base64Decode(photo!.split(',').last)),
+            backgroundImage: photo == null ? null : uploadedImage(photo!),
             child: photo == null ? Icon(Icons.person_outline_rounded, color: context.p.muted) : null,
           ),
           const SizedBox(width: 12),
@@ -577,7 +577,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 Future<String?> _reverseGeocode(LatLng p) async {
   try {
     final u = Uri.parse('https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${p.latitude}&lon=${p.longitude}&accept-language=uz&zoom=18');
-    final r = await http.get(u, headers: {'User-Agent': 'SalerAI/1.0 (uz.saler.ai)'}).timeout(const Duration(seconds: 8));
+    final r = await http.get(u, headers: {'User-Agent': 'Rydex/1.0 (uz.rydex.app)'}).timeout(const Duration(seconds: 8));
     if (r.statusCode != 200) return null;
     final j = jsonDecode(r.body);
     final name = (j['display_name'] ?? '').toString();
