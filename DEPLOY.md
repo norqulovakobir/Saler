@@ -57,7 +57,7 @@ https://saler-api.akobirnorqulov104.workers.dev/api/health
 Kutilgan javob:
 
 ```json
-{"ok":true,"service":"Saler AI API","database":true,"email":true,
+{"ok":true,"service":"Rydex API","database":true,"email":true,
  "emailSender":true,"admin":true,"media":{"store":"r2"}}
 ```
 

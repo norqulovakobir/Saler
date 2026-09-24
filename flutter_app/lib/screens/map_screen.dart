@@ -247,7 +247,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       final uri = Uri.parse(
           'https://router.project-osrm.org/route/v1/$profile/${from.longitude},${from.latitude};${to.longitude},${to.latitude}?overview=full&geometries=geojson&steps=true');
       final r = await http.get(uri, headers: {
-        'User-Agent': 'SalerAI/1.0'
+        'User-Agent': 'Rydex/1.0'
       }).timeout(const Duration(seconds: 15));
       final j = jsonDecode(r.body);
       if (r.statusCode != 200 ||
@@ -478,27 +478,27 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         return [
           TileLayer(
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'uz.saler.ai')
+              userAgentPackageName: 'uz.rydex.app')
         ];
       case MapLayer.satellite:
         return [
           TileLayer(
               urlTemplate: '$esri/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-              userAgentPackageName: 'uz.saler.ai')
+              userAgentPackageName: 'uz.rydex.app')
         ];
       case MapLayer.hybrid:
         return [
           TileLayer(
               urlTemplate: '$esri/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-              userAgentPackageName: 'uz.saler.ai'),
+              userAgentPackageName: 'uz.rydex.app'),
           TileLayer(
               urlTemplate:
                   '$esri/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
-              userAgentPackageName: 'uz.saler.ai'),
+              userAgentPackageName: 'uz.rydex.app'),
           TileLayer(
               urlTemplate:
                   '$esri/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
-              userAgentPackageName: 'uz.saler.ai'),
+              userAgentPackageName: 'uz.rydex.app'),
         ];
     }
   }

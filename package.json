@@ -1,7 +1,7 @@
 {
-  "name": "saler-ai",
+  "name": "rydex",
   "private": true,
-  "description": "Saler AI: flutter_app/ (mobil ilova), server/ (backend), admin/ (admin panel), design/ (dizayn maketlari)",
+  "description": "Rydex: flutter_app/ (mobil ilova), server/ (backend), admin/ (admin panel), design/ (dizayn maketlari)",
   "scripts": {
     "postinstall": "npm run build",
     "build": "npm --prefix admin ci && npm --prefix admin run build",

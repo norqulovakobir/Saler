@@ -1,4 +1,4 @@
-# Saler AI
+# Rydex
 
 | Papka | Nima | Sozlama |
 |---|---|---|

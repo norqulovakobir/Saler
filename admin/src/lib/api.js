@@ -1,7 +1,7 @@
 'use client';
 // server/ dagi /api/admin bilan ishlash. Token brauzer xotirasida.
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000').replace(/\/$/, '');
-const KEY = 'saler_admin_token';
+const KEY = 'rydex_admin_token';
 
 export const getToken = () => { try { return localStorage.getItem(KEY); } catch { return null; } };
 export const setToken = (t) => { try { t ? localStorage.setItem(KEY, t) : localStorage.removeItem(KEY); } catch {} };

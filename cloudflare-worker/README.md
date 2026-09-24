@@ -1,4 +1,4 @@
-# Saler AI — Cloudflare Worker + D1 + R2
+# Rydex — Cloudflare Worker + D1 + R2
 
 Bu papka eski `server/` kodidan mustaqil, Cloudflare uchun tayyor backenddir.
 Eski Express/PostgreSQL server o'zgartirilmagan.
@@ -17,7 +17,7 @@ Worker sozlamalarida quyidagilar bo'lishi kerak:
 - `DB` — `saler-db` D1 binding (konfiguratsiyada bor)
 - `BREVO_API_KEY` — **Secret** (siz allaqachon qo'shgansiz)
 - `BREVO_SENDER_EMAIL` — oddiy Variable, tasdiqlangan jo'natuvchi emaili
-- `BREVO_SENDER_NAME` — oddiy Variable, masalan `Saler AI`
+- `BREVO_SENDER_NAME` — oddiy Variable, masalan `Rydex`
 - `ADMIN_PASSWORD` — **Secret**, admin panelga kirish uchun o'zingiz tanlaydigan kuchli parol
 
 Har yangi Worker versiyasidan oldin bazani ham yangilang:

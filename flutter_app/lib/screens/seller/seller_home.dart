@@ -802,7 +802,7 @@ void openProductForm(BuildContext context, Product? p, VoidCallback onSaved) {
                       for (final f in files.take(10 - photos.length)) {
                         photos.add(await Api.instance.uploadImage(
                           await f.readAsBytes(),
-                          mime: Api.imageMimeForPath(f.path),
+                          mime: Api.imageMimeFor(f),
                         ));
                       }
                       setSt(() {});
@@ -999,7 +999,7 @@ class ProfileTab extends StatelessWidget {
                       try {
                         final logo = await Api.instance.uploadImage(
                           await f.readAsBytes(),
-                          mime: Api.imageMimeForPath(f.path),
+                          mime: Api.imageMimeFor(f),
                         );
                         final r = await Api.instance.put('/api/seller/shop', {'logo': logo});
                         st.sellerShop = Shop.fromJson(r['shop']);
@@ -1117,7 +1117,7 @@ class ProfileTab extends StatelessWidget {
                   mapController: ctrl,
                   options: MapOptions(initialCenter: pos ?? const LatLng(41.3111, 69.2797), initialZoom: pos == null ? 12 : 15, onTap: (_, p) => setSt(() => pos = p)),
                   children: [
-                    TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'uz.saler.ai'),
+                    TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'uz.rydex.app'),
                     if (pos != null) MarkerLayer(markers: [Marker(point: pos!, width: 44, height: 52, child: Icon(Icons.location_on, color: c.p.danger, size: 44))]),
                   ],
                 ),

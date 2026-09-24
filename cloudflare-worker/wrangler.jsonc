@@ -6,7 +6,10 @@
   "keep_vars": true,
   // Ulashish havolasi (/p/<id>, /s/<id>) shu manzilga o'tkazadi
   "vars": {
-    "WEB_BASE": "https://saler-web.onrender.com"
+    "WEB_BASE": "https://saler-web.onrender.com",
+    // Emailda "Kimdan" qatorida ko'rinadigan nom. Dashboard'da eski qiymat
+    // ("Saler AI") qolib ketmasligi uchun shu yerda aniq belgilanadi.
+    "BREVO_SENDER_NAME": "Rydex"
   },
   "preview_urls": false,
   "observability": {

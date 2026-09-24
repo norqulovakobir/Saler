@@ -1,4 +1,4 @@
-# Saler AI — Admin panel
+# Rydex — Admin panel
 
 Next.js 15 (App Router, JavaScript) + Tailwind v4 + Recharts. Ma'lumotlar `bot/` serveridagi `/api/admin/*` dan olinadi.
 

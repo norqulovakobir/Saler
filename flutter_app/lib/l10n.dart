@@ -32,6 +32,14 @@ class L10n {
     'Buyurtma': ['Заказы', 'Orders'],
     'AI tavsiya': ['AI советы', 'AI tips'],
     'Mahsulot': ['Товары', 'Products'],
+    'Ortga': ['Назад', 'Back'],
+    // Kuryerga chiqadigan bildirishnoma
+    'Sizga buyurtma bor': ['У вас есть заказ', 'You have an order'],
+    'ta yangi buyurtma': ['новых заказа', 'new orders'],
+    'Yetkazib berish': ['Доставка', 'Delivery'],
+    'Yuk': ['Груз', 'Cargo'],
+    // Do'kon kartochkasida: "12 mahsulot"
+    'mahsulot': ['товар', 'products'],
     'Profil': ['Профиль', 'Profile'],
     'Mehmon': ['Гость', 'Guest'],
     'Mening sahifam': ['Моя страница', 'My space'],

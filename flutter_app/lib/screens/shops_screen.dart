@@ -381,10 +381,13 @@ class _ShopsScreenState extends State<ShopsScreen> {
                     crossAxisCount: 2,
                     mainAxisSpacing: 12,
                     crossAxisSpacing: 12,
-                    childAspectRatio: .86),
+                    // Muqova 96px + nom/tavsif: avvalgi .86 kartani keraksiz
+                    // cho'zib yuborardi.
+                    childAspectRatio: .9),
                 delegate: SliverChildBuilderDelegate(
                   (_, i) {
                     final card = ShopCard(shops[i],
+                        index: i,
                         onTap: () => Navigator.of(context).push(
                             MaterialPageRoute(
                                 builder: (_) => ShopScreen(shops[i].id))));

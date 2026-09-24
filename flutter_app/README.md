@@ -1,6 +1,6 @@
-# Saler AI — Flutter ilova
+# Rydex — Flutter ilova
 
-Saler AI mobil ilovasi (Android/iOS). Boshlang'ich ishlab chiqarish rejimida `cloudflare-worker/` dagi Cloudflare Worker + D1 backendiga ulanadi.
+Rydex mobil ilovasi (Android/iOS). Boshlang'ich ishlab chiqarish rejimida `cloudflare-worker/` dagi Cloudflare Worker + D1 backendiga ulanadi.
 
 ## Ishga tushirish
 

@@ -2,7 +2,7 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { Moon, Sun } from 'lucide-react';
 
-const KEY = 'saler_admin_theme';
+const KEY = 'rydex_admin_theme';
 const Ctx = createContext({ theme: 'light', setTheme: () => {} });
 
 // <html data-theme> ni brauzer chizishidan oldin o'rnatadi (miltillashsiz)
