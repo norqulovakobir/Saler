@@ -5,3 +5,9 @@
 
 # Tayyor APK fayllar (tarqatish uchun, git tarixiga kirmaydi)
 /apk/
+
+# Firebase: maxfiy kalitlar git tarixiga tushmasin
+flutter_app/android/app/google-services.json
+flutter_app/ios/Runner/GoogleService-Info.plist
+**/firebase-service-account*.json
+**/*-firebase-adminsdk-*.json

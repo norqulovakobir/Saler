@@ -19,9 +19,30 @@ class CouriersMapScreen extends StatefulWidget {
   State<CouriersMapScreen> createState() => _CouriersMapScreenState();
 }
 
-class _CouriersMapScreenState extends State<CouriersMapScreen> {
+class _CouriersMapScreenState extends State<CouriersMapScreen>
+    with SingleTickerProviderStateMixin {
   final ctrl = MapController();
   List<Courier> couriers = [];
+
+  /// Server har 15 soniyada yangi nuqta beradi. Belgini shu zahoti ko'chirsak
+  /// u sakrab yuradi, shuning uchun eski va yangi nuqta orasida silliq
+  /// suriladi — harakat jonli ko'rinadi.
+  late final AnimationController _move = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 2600))
+    ..addListener(() {
+      if (mounted) setState(() {});
+    });
+  final Map<String, LatLng> _from = {};
+
+  /// Belgi hozir turgan (oraliq) nuqtasi
+  LatLng _at(Courier c) {
+    final to = LatLng(c.lat!, c.lon!);
+    final from = _from[c.id];
+    if (from == null || _move.value >= 1) return to;
+    final t = Curves.easeInOut.transform(_move.value);
+    return LatLng(from.latitude + (to.latitude - from.latitude) * t,
+        from.longitude + (to.longitude - from.longitude) * t);
+  }
   Courier? selected;
   LatLng? me;
   bool loading = true;
@@ -36,6 +57,7 @@ class _CouriersMapScreenState extends State<CouriersMapScreen> {
   @override
   void dispose() {
     _t?.cancel();
+    _move.dispose();
     super.dispose();
   }
 
@@ -58,8 +80,18 @@ class _CouriersMapScreenState extends State<CouriersMapScreen> {
     try {
       final q = me == null ? '' : '?lat=${me!.latitude}&lon=${me!.longitude}';
       final r = await Api.instance.get('/api/couriers/nearby$q');
+      // Yangi nuqtalar kelishidan oldin belgilar hozir qayerda turganini
+      // eslab qolamiz — siljish shu joydan boshlanadi.
+      final was = {
+        for (final c in couriers)
+          if (c.lat != null && c.lon != null) c.id: _at(c)
+      };
       couriers = (r as List).map((e) => Courier.fromJson(e)).toList();
+      _from
+        ..clear()
+        ..addAll(was);
       if (selected != null) selected = couriers.where((c) => c.id == selected!.id).firstOrNull ?? selected;
+      if (_from.isNotEmpty) _move.forward(from: 0);
     } catch (_) {}
     if (mounted) setState(() => loading = false);
   }
@@ -77,20 +109,20 @@ class _CouriersMapScreenState extends State<CouriersMapScreen> {
           mapController: ctrl,
           options: MapOptions(initialCenter: const LatLng(41.3111, 69.2797), initialZoom: 12, onTap: (_, __) => setState(() => selected = null)),
           children: [
-            TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'uz.saler.ai'),
+            TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'uz.rydex.app'),
             MarkerLayer(markers: [
               if (me != null)
                 Marker(point: me!, width: 22, height: 22, child: Container(decoration: BoxDecoration(color: const Color(0xFF2F80ED), shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3)))),
-              for (final c in couriers.where((c) => c.lat != null))
+              for (final c in couriers.where((c) => c.lat != null && c.lon != null))
                 Marker(
-                  point: LatLng(c.lat!, c.lon!),
+                  point: _at(c),
                   width: 56,
                   height: 66,
                   alignment: Alignment.topCenter,
                   child: GestureDetector(
                     onTap: () {
                       setState(() => selected = c);
-                      ctrl.move(LatLng(c.lat!, c.lon!), ctrl.camera.zoom < 14 ? 14 : ctrl.camera.zoom);
+                      ctrl.move(_at(c), ctrl.camera.zoom < 14 ? 14 : ctrl.camera.zoom);
                     },
                     child: Column(children: [
                       ProviderAvatar(photo: c.photo, icon: providerIcon(c), role: 'courier', size: selected?.id == c.id ? 50 : 44, online: true),

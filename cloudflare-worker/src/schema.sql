@@ -1,4 +1,4 @@
--- Saler AI Cloudflare D1 (SQLite) schema.
+-- Rydex Cloudflare D1 (SQLite) schema.
 -- Bu fayl qayta ishga tushirilsa mavjud jadval va ma'lumotlar o'chmaydi.
 PRAGMA foreign_keys = ON;
 
@@ -189,6 +189,10 @@ CREATE TABLE IF NOT EXISTS couriers (
   online INTEGER NOT NULL DEFAULT 0,
   lat REAL,
   lon REAL,
+  -- Harakat tomoni (gradus) va tezlik (m/s): xaritada belgi to'g'ri tomonga
+  -- qaraydi, kelish vaqti esa haqiqiy tezlikka qarab hisoblanadi.
+  heading REAL,
+  speed REAL,
   location_at TEXT,
   deliveries INTEGER NOT NULL DEFAULT 0,
   rating REAL NOT NULL DEFAULT 5,
@@ -244,6 +248,23 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS chat_messages_user_idx ON chat_messages(user_id, scope, created_at DESC);
+
+-- Push xabar uchun qurilma tokenlari (Firebase Cloud Messaging).
+-- Bitta odamda bir nechta qurilma bo'lishi mumkin, shuning uchun token kalit.
+-- Rol alohida saqlanadi: kuryerga "buyurtma bor", do'konga "yangi buyurtma"
+-- kabi turli xabarlar boradi.
+CREATE TABLE IF NOT EXISTS push_tokens (
+  token TEXT PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  courier_id TEXT,
+  shop_id TEXT,
+  platform TEXT NOT NULL DEFAULT 'android',
+  created_at TEXT NOT NULL,
+  seen_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS push_courier_idx ON push_tokens(courier_id);
+CREATE INDEX IF NOT EXISTS push_shop_idx ON push_tokens(shop_id);
+CREATE INDEX IF NOT EXISTS push_user_idx ON push_tokens(user_id);
 
 CREATE TABLE IF NOT EXISTS user_searches (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

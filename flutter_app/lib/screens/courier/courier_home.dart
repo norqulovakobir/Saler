@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -10,6 +11,7 @@ import '../../photo.dart';
 import '../../l10n.dart';
 import '../../main.dart';
 import '../../models.dart';
+import '../../notify.dart';
 import '../../state.dart';
 import '../../theme.dart';
 import '../../widgets.dart';
@@ -84,28 +86,109 @@ class _CourierHomeState extends State<CourierHome> {
 
   @override
   void dispose() {
-    _loc?.cancel();
+    _stopReporting();
     _statsTick.dispose();
     pager.dispose();
     super.dispose();
   }
 
-  /// Onlayn bo'lganda joylashuv har 15 soniyada serverga yuboriladi (xaridorlar xaritada ko'radi)
-  void _startReporting() {
-    _loc?.cancel();
-    _report();
-    _loc = Timer.periodic(const Duration(seconds: 15), (_) => _report());
+  /// Joylashuv oqimi: Android'da foreground service bilan ishlaydi, shuning
+  /// uchun ilova orqa fonga o'tsa yoki ekran o'chsa ham kuzatuv davom etadi.
+  /// Bildirishnoma doimiy ko'rinib turadi — Android talabi va kuryer uchun
+  /// "hozir kuzatilyapman" degan ochiq ishora.
+  StreamSubscription<Position>? _stream;
+  DateTime _sentAt = DateTime.fromMillisecondsSinceEpoch(0);
+  Position? _last;
+
+  LocationSettings get _settings {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      return AndroidSettings(
+        accuracy: LocationAccuracy.high,
+        // 20 metrdan kam siljishda yangi nuqta kelmaydi — batareya va
+        // kunlik D1 yozuv chegarasi shu bilan tejaladi.
+        distanceFilter: 20,
+        intervalDuration: const Duration(seconds: 10),
+        foregroundNotificationConfig: const ForegroundNotificationConfig(
+          notificationTitle: 'Rydex — yetkazib berish',
+          notificationText: "Joylashuvingiz xaridorlarga ko'rinmoqda",
+          notificationChannelName: 'Kuryer kuzatuvi',
+          enableWakeLock: true,
+          setOngoing: true,
+        ),
+      );
+    }
+    return const LocationSettings(
+        accuracy: LocationAccuracy.high, distanceFilter: 20);
   }
 
-  Future<void> _report() async {
-    final st = AppState.instance;
-    if (st.courier == null || st.courier!.online != true) return;
+  Future<void> _startReporting() async {
+    await _stopReporting();
+    if (!await _ensurePermission()) return;
+    _report(await _safePosition());
+    _stream = Geolocator.getPositionStream(locationSettings: _settings)
+        .listen(_report, onError: (_) {});
+    // Turgan joyida ham server "onlayn" deb bilishi uchun yurak urishi:
+    // distanceFilter tufayli oqim jim qolishi mumkin.
+    _loc = Timer.periodic(const Duration(seconds: 45), (_) {
+      if (_last != null) _report(_last!, force: true);
+    });
+  }
+
+  Future<void> _stopReporting() async {
+    _loc?.cancel();
+    _loc = null;
+    await _stream?.cancel();
+    _stream = null;
+  }
+
+  Future<bool> _ensurePermission() async {
+    var perm = await Geolocator.checkPermission();
+    if (perm == LocationPermission.denied) {
+      perm = await Geolocator.requestPermission();
+    }
+    return perm != LocationPermission.denied &&
+        perm != LocationPermission.deniedForever;
+  }
+
+  Future<Position?> _safePosition() async {
     try {
-      var perm = await Geolocator.checkPermission();
-      if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
-      if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) return;
-      final pos = await Geolocator.getCurrentPosition(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high)).timeout(const Duration(seconds: 12));
-      await Api.instance.post('/api/courier/location', {'lat': pos.latitude, 'lon': pos.longitude, 'online': true});
+      return await Geolocator.getCurrentPosition(
+              locationSettings: const LocationSettings(
+                  accuracy: LocationAccuracy.high))
+          .timeout(const Duration(seconds: 12));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Serverga yuborish: 20 metrdan kam siljish yoki 10 soniyadan tez
+  /// takrorlanish o'tkazib yuboriladi.
+  Future<void> _report(Position? pos, {bool force = false}) async {
+    final st = AppState.instance;
+    if (pos == null || st.courier == null || st.courier!.online != true) return;
+    final now = DateTime.now();
+    if (!force) {
+      if (now.difference(_sentAt).inSeconds < 10) return;
+      final prev = _last;
+      if (prev != null &&
+          Geolocator.distanceBetween(
+                  prev.latitude, prev.longitude, pos.latitude, pos.longitude) <
+              20) {
+        return;
+      }
+    }
+    _last = pos;
+    _sentAt = now;
+    try {
+      await Api.instance.post('/api/courier/location', {
+        'lat': pos.latitude,
+        'lon': pos.longitude,
+        'online': true,
+        // Yo'nalish va tezlik: xaritada belgi to'g'ri tomonga qaraydi va
+        // kelish vaqtini baholashda ishlatiladi.
+        if (pos.heading.isFinite) 'heading': pos.heading,
+        if (pos.speed.isFinite) 'speed': pos.speed,
+      });
       st.courier = st.courier!.copyWith(lat: pos.latitude, lon: pos.longitude);
       st.refresh();
     } catch (_) {}
@@ -117,9 +200,12 @@ class _CourierHomeState extends State<CourierHome> {
     st.courier = st.courier!.copyWith(online: v);
     st.refresh();
     if (v) {
-      _startReporting();
+      await Notify.instance.cancelOfflineNudge();
+      await _startReporting();
     } else {
-      _loc?.cancel();
+      await _stopReporting();
+      // Offline qolganda 3 soatdan keyin eslatma chiqadi
+      await Notify.instance.scheduleOfflineNudge();
       try {
         await Api.instance.post('/api/courier/location', {'online': false});
       } catch (_) {}
@@ -398,11 +484,37 @@ class _CourierOrdersTabState extends State<CourierOrdersTab> {
   /// Faol buyurtmalar: yangi (assigned) va yo'lda (picked)
   List<Order> get active => orders.where((o) => const {'assigned', 'picked'}.contains(o.deliveryStatus ?? 'assigned')).toList();
 
+  /// Bildirishnoma faqat yangi kelgan buyurtma uchun chiqsin: birinchi
+  /// yuklashda mavjudlari "ko'rilgan" deb belgilanadi.
+  final Set<String> _seenIds = {};
+  bool _firstLoad = true;
+
+  void _notifyNew(List<Order> list, List<CargoOrder> cargo) {
+    final fresh = <String>[];
+    for (final o in list) {
+      if (_seenIds.add(o.id) && !_firstLoad) {
+        fresh.add('${tr('Yetkazib berish')}: ${o.address.isNotEmpty ? o.address : o.customerName}');
+      }
+    }
+    for (final c in cargo) {
+      if (_seenIds.add(c.id) && !_firstLoad) {
+        fresh.add('${tr('Yuk')}: ${c.fromRegion} → ${c.toRegion}');
+      }
+    }
+    _firstLoad = false;
+    if (fresh.isEmpty) return;
+    Notify.instance.show(
+      fresh.length == 1 ? tr('Sizga buyurtma bor') : '${fresh.length} ${tr('ta yangi buyurtma')}',
+      fresh.take(3).join('\n'),
+    );
+  }
+
   Future<void> load({bool force = false}) async {
     try {
       final r = await Future.wait([Api.instance.get('/api/courier/orders'), Api.instance.get('/api/courier/cargo')]);
       orders = (r[0] as List).map((e) => Order.fromJson(e)).toList();
       requests = (r[1] as List).map((e) => CargoOrder.fromJson(e)).where((x) => x.kind == 'direct').toList();
+      _notifyNew(orders, requests);
       error = null;
     } catch (e) {
       error = _errText(e);
@@ -1506,7 +1618,7 @@ class _CourierMapTabState extends State<CourierMapTab> {
           mapController: ctrl,
           options: MapOptions(initialCenter: me ?? const LatLng(41.3111, 69.2797), initialZoom: me == null ? 12 : 15),
           children: [
-            TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'uz.saler.ai'),
+            TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'uz.rydex.app'),
             if (me != null)
               MarkerLayer(markers: [
                 Marker(
@@ -1728,7 +1840,7 @@ class CourierProfileTab extends StatelessWidget {
     try {
       final photo = await Api.instance.uploadImage(
         await f.readAsBytes(),
-        mime: Api.imageMimeForPath(f.path),
+        mime: Api.imageMimeFor(f),
       );
       final r = await Api.instance.put('/api/courier/profile', {'photo': photo});
       AppState.instance.courier = Courier.fromJson(r['courier']).copyWith(online: AppState.instance.courier?.online);

@@ -6,6 +6,7 @@ import {
   isMediaRef,
   r2Enabled, serializeShop, shopWithStats, storeDataUri, storeImageBytes, str, tariffPrice,
 } from './lib.js';
+import { nudgeOfflineCouriers, push, pushEnabled, registerToken, unregisterToken } from './push.js';
 
 const SHOP_STATS = `SELECT s.*,
   (SELECT COUNT(*) FROM products p WHERE p.shop_id=s.id AND p.active=1) AS product_count,
@@ -262,7 +263,15 @@ async function assignCourier(env, orderId) {
   if (!pick) return null;
   const result = await run(env, `UPDATE orders SET courier_id=?, delivery_status='assigned', updated_at=?
     WHERE id=? AND courier_id IS NULL AND status='new'`, [pick.candidate.id, now(), orderId]);
-  return num(result.meta && result.meta.changes) > 0 ? pick.candidate.id : null;
+  if (num(result.meta && result.meta.changes) <= 0) return null;
+  // Kuryer ilovani yopgan bo'lsa ham xabar yetadi (ilova ichidagi 20 soniyalik
+  // tekshiruvdan farqli). Push sozlanmagan bo'lsa jim o'tadi.
+  await push(env, { courierId: pick.candidate.id }, {
+    title: 'Sizga buyurtma bor',
+    body: `${order.shop_name || "Do'kon"} → ${order.address || order.customer_name || 'manzil'}`,
+    data: { type: 'order', orderId: order.id },
+  }).catch((error) => console.error('push xato', error));
+  return pick.candidate.id;
 }
 
 async function refreshInterests(env, userId) {
@@ -384,12 +393,17 @@ async function loginCourier(env, context, input) {
 }
 
 async function resetPassword(env, context, input) {
-  const role = input.role === 'seller' ? 'seller' : input.role === 'courier' ? 'courier' : null;
+  // 'cargo' ham couriers jadvalida yotadi. Avval u hech qaysi shoxga
+  // tushmay, yuk tashuvchi parolini umuman tiklab bo'lmasdi.
+  const type = input.role === 'courier' ? 'courier' : input.role === 'cargo' ? 'cargo' : null;
+  const role = input.role === 'seller' ? 'seller' : type ? 'courier' : null;
   if (!role) throw new HttpError(400, 'Rolni tanlang');
   const email = needEmail(input.email);
+  // Bir email bilan ham kuryer, ham yuk tashuvchi hisobi bo'lishi mumkin
+  // (couriers.UNIQUE(email, type)) — shuning uchun tur bo'yicha ajratiladi.
   const account = role === 'seller'
     ? await one(env, 'SELECT * FROM shops WHERE email=? AND email_verified_at IS NOT NULL ORDER BY created_at DESC LIMIT 1', [email])
-    : await one(env, 'SELECT * FROM couriers WHERE email=? AND email_verified_at IS NOT NULL ORDER BY created_at DESC LIMIT 1', [email]);
+    : await one(env, 'SELECT * FROM couriers WHERE email=? AND type=? AND email_verified_at IS NOT NULL ORDER BY created_at DESC LIMIT 1', [email, type]);
   if (!str(input.code).trim()) {
     if (!account) return { codeSent: true, email, expiresIn: 600, resendIn: 60 };
     return sendCode(env, { email, purpose: 'reset', name: account.first_name || account.name });
@@ -429,11 +443,36 @@ async function listShops(env, context, url) {
   } else {
     rows = await all(env, SHOP_STATS + ' WHERE s.active=1 ORDER BY sales DESC, product_count DESC, s.created_at DESC LIMIT ? OFFSET ?', [limit + 1, offset]);
   }
+  const items = rows.slice(0, limit);
   return {
-    items: rows.slice(0, limit).map((shop) => serializeShop(shop)),
+    items: await withPreviews(env, items),
     hasMore: rows.length > limit,
     seed: url.searchParams.get('seed') || 'default',
   };
+}
+
+/// Do'kon kartochkasi fonida o'sha do'konning mahsulot rasmlari aylanadi.
+/// Ro'yxatdagi har do'kon uchun alohida so'rov yubormaslik uchun hammasi
+/// bitta so'rovda olinadi va do'kon bo'yicha guruhlanadi.
+const PREVIEW_PER_SHOP = 5;
+
+async function withPreviews(env, shops) {
+  if (!shops.length) return [];
+  const ids = shops.map((s) => s.id);
+  const marks = ids.map(() => '?').join(',');
+  const rows = await all(env, `SELECT shop_id, photos FROM products
+    WHERE active=1 AND shop_id IN (${marks}) AND photos <> '[]'
+    ORDER BY created_at DESC LIMIT ?`, [...ids, ids.length * PREVIEW_PER_SHOP * 3]);
+  const byShop = new Map();
+  for (const row of rows) {
+    const list = byShop.get(row.shop_id) || [];
+    if (list.length >= PREVIEW_PER_SHOP) continue;
+    // Har mahsulotdan faqat birinchi rasm — karta bir do'konning turli
+    // mahsulotlarini ko'rsatsin, bitta mahsulotning rakurslarini emas.
+    const first = parseList(row.photos)[0];
+    if (first) byShop.set(row.shop_id, [...list, first]);
+  }
+  return shops.map((shop) => serializeShop(shop, { preview: byShop.get(shop.id) || [] }));
 }
 
 /// "Sizga yaqin": joylashuvga ruxsat bergan xaridorga yaqin-atrofdagi
@@ -895,7 +934,12 @@ async function courierLocation(env, context, input) {
   const online = input.online !== false;
   const location = locationOf({ lat: input.lat, lon: input.lon });
   if (online && location) {
-    await run(env, 'UPDATE couriers SET online=1, lat=?, lon=?, location_at=? WHERE id=?', [location.lat, location.lon, now(), courier.id]);
+    // Yo'nalish va tezlik ham saqlanadi: xaritada belgi harakat tomoniga
+    // qaraydi va kelish vaqtini baholashda ishlatiladi.
+    const heading = Number.isFinite(num(input.heading, NaN)) ? num(input.heading) : null;
+    const speed = Number.isFinite(num(input.speed, NaN)) ? Math.max(0, num(input.speed)) : null;
+    await run(env, 'UPDATE couriers SET online=1, lat=?, lon=?, heading=?, speed=?, location_at=? WHERE id=?',
+      [location.lat, location.lon, heading, speed, now(), courier.id]);
     const pending = await all(env, `SELECT id FROM orders WHERE courier_id IS NULL AND status='new' AND archived=0
       AND created_at>? ORDER BY created_at LIMIT 20`, [new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()]);
     for (const order of pending) {
@@ -1793,6 +1837,8 @@ async function api(request, env, execution, url) {
   }
   const path = pathname.slice(4);
   if (path === '/media/upload' && method === 'POST') return json(await uploadMedia(request, env, context));
+  if (path === '/push/register' && method === 'POST') return json(await registerToken(env, context, await body(request)));
+  if (path === '/push/unregister' && method === 'POST') return json(await unregisterToken(env, await body(request)));
   const input = ['POST', 'PUT', 'PATCH'].includes(method) ? await body(request) : {};
   let match;
 
@@ -2008,11 +2054,12 @@ export default {
         const media = { store: mediaStoreName(env) };
         return json({
           ok: true,
-          service: 'Saler AI API',
+          service: 'Rydex API',
           database: Boolean(env.DB),
           email: Boolean(env.BREVO_API_KEY && env.BREVO_SENDER_EMAIL),
           emailSender: Boolean(env.BREVO_SENDER_EMAIL),
           admin: Boolean(env.ADMIN_PASSWORD),
+          push: pushEnabled(env),
           media,
         });
       }
@@ -2038,5 +2085,7 @@ export default {
   },
   scheduled(_event, env, execution) {
     execution.waitUntil(cleanupStaleGuestData(env));
+    // Kunlik turtki: buyurtma bor, kuryer offline bo'lsa xabar beriladi
+    execution.waitUntil(nudgeOfflineCouriers(env).catch((e) => console.error('nudge xato', e)));
   },
 };

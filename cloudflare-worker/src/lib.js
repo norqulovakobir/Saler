@@ -380,7 +380,7 @@ export async function mediaResponse(env, ref, request = null, execution = null) 
 function emailHtml({ name, code, purpose }) {
   const title = PURPOSES[purpose] || 'Tasdiqlash';
   const safeName = escapeHtml(name || 'Foydalanuvchi');
-  return `<!doctype html><html lang="uz"><body style="margin:0;background:#f5f6f8;font-family:Arial,sans-serif;color:#15202b"><div style="max-width:520px;margin:32px auto;background:#fff;border-radius:18px;padding:32px"><div style="font-size:22px;font-weight:800">Saler AI</div><h1 style="font-size:22px;margin:28px 0 8px">${escapeHtml(title)}</h1><p>Salom, ${safeName}. Tasdiqlash kodingiz:</p><div style="letter-spacing:9px;font-size:32px;font-weight:800;background:#f1f5ff;border-radius:12px;padding:18px 22px;text-align:center">${code}</div><p style="margin-top:24px;color:#667085">Kod 10 daqiqa amal qiladi. Uni hech kimga bermang.</p></div></body></html>`;
+  return `<!doctype html><html lang="uz"><body style="margin:0;background:#f5f6f8;font-family:Arial,sans-serif;color:#15202b"><div style="max-width:520px;margin:32px auto;background:#fff;border-radius:18px;padding:32px"><div style="font-size:22px;font-weight:800">Rydex</div><h1 style="font-size:22px;margin:28px 0 8px">${escapeHtml(title)}</h1><p>Salom, ${safeName}. Tasdiqlash kodingiz:</p><div style="letter-spacing:9px;font-size:32px;font-weight:800;background:#f1f5ff;border-radius:12px;padding:18px 22px;text-align:center">${code}</div><p style="margin-top:24px;color:#667085">Kod 10 daqiqa amal qiladi. Uni hech kimga bermang.</p></div></body></html>`;
 }
 
 export function escapeHtml(value) {
@@ -412,9 +412,9 @@ export async function sendCode(env, { email, purpose, name }) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'api-key': env.BREVO_API_KEY },
       body: JSON.stringify({
-        sender: { email: env.BREVO_SENDER_EMAIL, name: env.BREVO_SENDER_NAME || 'Saler AI' },
+        sender: { email: env.BREVO_SENDER_EMAIL, name: env.BREVO_SENDER_NAME || 'Rydex' },
         to: [{ email, name: name || 'Foydalanuvchi' }],
-        subject: `Saler AI — ${PURPOSES[purpose]} kodi`,
+        subject: `Rydex — ${PURPOSES[purpose]} kodi`,
         htmlContent: emailHtml({ name, code, purpose }),
       }),
     });
@@ -538,7 +538,17 @@ export function serializeCourier(courier, extra = {}) {
     emailVerified: Boolean(courier.email_verified_at), active: bool(courier.active), vehicle: courier.vehicle || 'car', vehicleType: courier.vehicle_type || '',
     capacityKg: num(courier.capacity_kg), regions: parseList(courier.regions), pricePerKm: num(courier.price_per_km), basePrice: num(courier.base_price),
     about: courier.about || '', online: bool(courier.online),
-    location: courier.lat != null && courier.lon != null ? { lat: num(courier.lat), lon: num(courier.lon), updatedAt: courier.location_at || null } : null,
+    location: courier.lat != null && courier.lon != null
+      ? {
+        lat: num(courier.lat),
+        lon: num(courier.lon),
+        updatedAt: courier.location_at || null,
+        // Harakat tomoni (gradus) va tezlik (m/s) — xaritada belgini
+        // burish va kelish vaqtini baholash uchun.
+        heading: courier.heading != null ? num(courier.heading) : null,
+        speed: courier.speed != null ? num(courier.speed) : null,
+      }
+      : null,
     deliveries: num(courier.deliveries), rating: num(courier.rating, 5), createdAt: courier.created_at, ...extra,
   };
 }
