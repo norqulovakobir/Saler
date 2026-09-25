@@ -9,5 +9,10 @@
 # Firebase: maxfiy kalitlar git tarixiga tushmasin
 flutter_app/android/app/google-services.json
 flutter_app/ios/Runner/GoogleService-Info.plist
+# Maxfiy muhit fayllari (API kalitlar, parollar)
+.env
+**/.env
+!**/.env.example
+
 **/firebase-service-account*.json
 **/*-firebase-adminsdk-*.json
